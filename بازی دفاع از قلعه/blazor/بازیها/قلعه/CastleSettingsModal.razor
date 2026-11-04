@@ -1,0 +1,322 @@
+<section class="cg-dialog" role="dialog" aria-modal="true" aria-labelledby="cg-settings-title">
+    <div class="cg-dialog-head">
+        <div><span class="cg-eyebrow">قوانین بازی</span><h2 id="cg-settings-title">تنظیمات نبرد</h2><span class="cg-version">نسخهٔ ۱۹</span></div>
+        <button type="button" class="cg-btn" @onclick="OnClose" aria-label="بستن تنظیمات">بستن</button>
+    </div>
+    <div class="cg-form">
+        <fieldset>
+            <legend>صدا و افکت‌ها</legend>
+            <div class="cg-choice-row">
+                <button type="button" class="cg-btn @(Draft.AmbientSound ? "cg-gold" : "")" aria-pressed="@Draft.AmbientSound" @onclick="() => Draft.AmbientSound = !Draft.AmbientSound">صدای طبیعت</button>
+                <button type="button" class="cg-btn @(Draft.MarchSound ? "cg-gold" : "")" aria-pressed="@Draft.MarchSound" @onclick="() => Draft.MarchSound = !Draft.MarchSound">حرکت لشکر</button>
+                <button type="button" class="cg-btn @(Draft.SoundEnabled ? "cg-gold" : "")" aria-pressed="@Draft.SoundEnabled" @onclick="() => Draft.SoundEnabled = !Draft.SoundEnabled">صدا</button>
+            </div>
+            <p class="cg-muted">هر صدا دکمهٔ − و + خودش را دارد. صفر یعنی خاموش. تغییر همان لحظه روی نبردِ در جریان هم اثر می‌گذارد.</p>
+            <div class="cg-volumes">
+                @foreach (var sound in SoundKeys)
+                {
+                    <div class="cg-volume">
+                        <span>@sound.Value</span>
+                        <button type="button" class="cg-step" aria-label="کاهش @sound.Value" @onclick="() => Vol(sound.Key, -1)">−</button>
+                        <b>@PercentOf(sound.Key)</b>
+                        <button type="button" class="cg-step" aria-label="افزایش @sound.Value" @onclick="() => Vol(sound.Key, 1)">+</button>
+                    </div>
+                }
+            </div>
+            <button type="button" class="cg-btn" @onclick="ResetVolumes">همه ۱۰۰٪</button>
+        </fieldset>
+        <fieldset>
+            <legend>راه‌های نقشه</legend>
+            <button type="button" class="cg-btn @(Draft.OpenRoads ? "cg-gold" : "")" aria-pressed="@Draft.OpenRoads" @onclick="() => Draft.OpenRoads = !Draft.OpenRoads">همهٔ قلعه‌ها به هم دسترسی داشته باشند</button>
+            <div class="cg-step-row">
+                <span>حداقل فاصلهٔ دو قلعهٔ همسایه</span>
+                <button type="button" class="cg-step" aria-label="کاهش حداقل فاصلهٔ دو قلعهٔ همسایه" @onclick="() => Dist(-1)">−</button>
+                <b>@Draft.MinCastleDistance متر</b>
+                <button type="button" class="cg-step" aria-label="افزایش حداقل فاصلهٔ دو قلعهٔ همسایه" @onclick="() => Dist(1)">+</button>
+            </div>
+        </fieldset>
+        <fieldset>
+            <legend>نیروها — قدرت و سرعت هر نوع سرباز</legend>
+            <p class="cg-muted">قدرت، نیروی رزمی هر سرباز است و سرعت، ضریب راهپیمایی او. تغییر روی همین نبرد هم اثر می‌گذارد.</p>
+            <div class="cg-step-row">
+                <span>سرباز عادی — قدرت</span>
+                <button type="button" class="cg-step" aria-label="کاهش قدرت سرباز عادی" @onclick="() => Unit("normal","power",-1)">−</button>
+                <b>@Draft.TroopTuning.NormalPower.ToString("0.00")</b>
+                <button type="button" class="cg-step" aria-label="افزایش قدرت سرباز عادی" @onclick="() => Unit("normal","power",1)">+</button>
+            </div>
+            <div class="cg-step-row">
+                <span>سرباز عادی — سرعت</span>
+                <button type="button" class="cg-step" aria-label="کاهش سرعت سرباز عادی" @onclick="() => Unit("normal","speed",-1)">−</button>
+                <b>@Draft.TroopTuning.NormalSpeed.ToString("0.00")</b>
+                <button type="button" class="cg-step" aria-label="افزایش سرعت سرباز عادی" @onclick="() => Unit("normal","speed",1)">+</button>
+            </div>
+            <div class="cg-step-row">
+                <span>سرباز سریع — قدرت</span>
+                <button type="button" class="cg-step" aria-label="کاهش قدرت سرباز سریع" @onclick="() => Unit("fast","power",-1)">−</button>
+                <b>@Draft.TroopTuning.FastPower.ToString("0.00")</b>
+                <button type="button" class="cg-step" aria-label="افزایش قدرت سرباز سریع" @onclick="() => Unit("fast","power",1)">+</button>
+            </div>
+            <div class="cg-step-row">
+                <span>سرباز سریع — سرعت</span>
+                <button type="button" class="cg-step" aria-label="کاهش سرعت سرباز سریع" @onclick="() => Unit("fast","speed",-1)">−</button>
+                <b>@Draft.TroopTuning.FastSpeed.ToString("0.00")</b>
+                <button type="button" class="cg-step" aria-label="افزایش سرعت سرباز سریع" @onclick="() => Unit("fast","speed",1)">+</button>
+            </div>
+            <div class="cg-step-row">
+                <span>سرباز سنگین — قدرت</span>
+                <button type="button" class="cg-step" aria-label="کاهش قدرت سرباز سنگین" @onclick="() => Unit("heavy","power",-1)">−</button>
+                <b>@Draft.TroopTuning.HeavyPower.ToString("0.00")</b>
+                <button type="button" class="cg-step" aria-label="افزایش قدرت سرباز سنگین" @onclick="() => Unit("heavy","power",1)">+</button>
+            </div>
+            <div class="cg-step-row">
+                <span>سرباز سنگین — سرعت</span>
+                <button type="button" class="cg-step" aria-label="کاهش سرعت سرباز سنگین" @onclick="() => Unit("heavy","speed",-1)">−</button>
+                <b>@Draft.TroopTuning.HeavySpeed.ToString("0.00")</b>
+                <button type="button" class="cg-step" aria-label="افزایش سرعت سرباز سنگین" @onclick="() => Unit("heavy","speed",1)">+</button>
+            </div>
+            <div class="cg-step-row">
+                <span>سرعت چرخش نورها</span>
+                <button type="button" class="cg-step" aria-label="کاهش سرعت چرخش نورها" @onclick="() => Halo(-1)">−</button>
+                <b>@(Draft.HaloSpin <= 0.001 ? "ثابت" : "×" + Draft.HaloSpin.ToString("0.00"))</b>
+                <button type="button" class="cg-step" aria-label="افزایش سرعت چرخش نورها" @onclick="() => Halo(1)">+</button>
+            </div>
+            <div class="cg-step-row">
+                <span>شفافیت نقطه‌چین مسیر حمله</span>
+                <button type="button" class="cg-step" aria-label="کاهش شفافیت نقطه‌چین مسیر حمله" @onclick="() => Dash(-1)">−</button>
+                <b>@((int)Math.Round(Draft.AttackDash * 100))٪</b>
+                <button type="button" class="cg-step" aria-label="افزایش شفافیت نقطه‌چین مسیر حمله" @onclick="() => Dash(1)">+</button>
+            </div>
+        </fieldset>
+        <fieldset>
+            <legend>سرعت بازی</legend>
+            <div class="cg-choice-row">
+                @foreach (var speed in new[] { 1, 2, 3 })
+                {
+                    <button type="button" class="cg-btn @(Draft.SpeedMultiplier == speed ? "cg-gold" : "")" aria-pressed="@(Draft.SpeedMultiplier == speed)" @onclick="() => Draft.SpeedMultiplier = speed">@(speed)x</button>
+                }
+            </div>
+        </fieldset>
+        <fieldset>
+            <legend>سقف تولید تمام قلعه‌ها (خودی و دشمن)</legend>
+            <div class="cg-step-row">
+                <span>تعداد سرباز</span>
+                <button type="button" class="cg-step" aria-label="کاهش سقف تولید" @onclick="() => Cap(-1)">−</button>
+                <b>@Draft.MaxTroopsCap</b>
+                <button type="button" class="cg-step" aria-label="افزایش سقف تولید" @onclick="() => Cap(1)">+</button>
+            </div>
+            <div class="cg-choice-row">
+                @foreach (var cap in new[] { 30, 40, 50, 60, 80, 100 })
+                {
+                    <button type="button" class="cg-btn @(Draft.MaxTroopsCap == cap ? "cg-gold" : "")" @onclick="() => Draft.MaxTroopsCap = cap">@cap</button>
+                }
+            </div>
+            <p class="cg-muted">قلعه‌های تیمی از ظرفیت ۲۰ شروع می‌کنند؛ اگر ۵ ثانیه در ظرفیت فعلی کامل بمانند، ظرفیتشان خودکار ۱۰ نفر بیشتر می‌شود تا به این سقف برسند. مازاد بالاتر از سقف نهایی هر ثانیهٔ بازی یک سرباز کم می‌شود.</p>
+            <p class="cg-muted">قلعه‌های خاکستری مستقل از این تنظیم، فقط تا ۱۰ نفر رشد می‌کنند. پس از تصرف، سقف بالا برای آن‌ها اعمال می‌شود.</p>
+        </fieldset>
+        <fieldset>
+            <legend>محل درگیری سربازان</legend>
+            <div class="cg-choice-row">
+                <button type="button" class="cg-btn @(Draft.BattleMode == BattleMode.Field ? "cg-gold" : "")" aria-pressed="@(Draft.BattleMode == BattleMode.Field)" @onclick="() => Draft.BattleMode = BattleMode.Field">همه‌جا (مسیر و قلعه)</button>
+                <button type="button" class="cg-btn @(Draft.BattleMode == BattleMode.Castle ? "cg-gold" : "")" aria-pressed="@(Draft.BattleMode == BattleMode.Castle)" @onclick="() => Draft.BattleMode = BattleMode.Castle">فقط قلعهٔ مقصد</button>
+            </div>
+            <p class="cg-muted">در حالت دوم گروه‌ها در مسیر از کنار هم عبور می‌کنند. قابلیت تیراندازی برج‌ها مستقل از برخورد گروه‌هاست.</p>
+        </fieldset>
+        <fieldset>
+            <legend>ساخت نقشهٔ رندوم</legend>
+            <p class="cg-muted">نقشه هیچ کوهی ندارد؛ فقط جزیره، خلیج و آبِ آزاد. کشتی و قایق هم فقط روی آبِ آزاد می‌نشینند.</p>
+            <div class="cg-choice-row">
+                @foreach (var players in new[] { 2, 3, 4 })
+                {
+                    <button type="button" class="cg-btn @(Draft.CustomMap.Players == players ? "cg-gold" : "")" aria-pressed="@(Draft.CustomMap.Players == players)" @onclick="() => Draft.CustomMap.Players = players">@players بازیکن</button>
+                }
+            </div>
+            <button type="button" class="cg-btn @(Draft.CustomMap.LargeMap ? "cg-gold" : "")" aria-pressed="@Draft.CustomMap.LargeMap" @onclick="() => Draft.CustomMap.LargeMap = !Draft.CustomMap.LargeMap">نقشهٔ بزرگ با قابلیت زوم</button>
+            <button type="button" class="cg-btn @(Draft.CustomMap.RandomRoads ? "cg-gold" : "")" aria-pressed="@Draft.CustomMap.RandomRoads" @onclick="() => Draft.CustomMap.RandomRoads = !Draft.CustomMap.RandomRoads">راه‌ها کاملاً رندوم باشند</button>
+            <div class="cg-step-row">
+                <span>قلعهٔ عادی</span>
+                <button type="button" class="cg-step" aria-label="کاهش قلعهٔ عادی" @onclick="() => MapCount("normal",-1)">−</button>
+                <b>@Draft.CustomMap.Normal</b>
+                <button type="button" class="cg-step" aria-label="افزایش قلعهٔ عادی" @onclick="() => MapCount("normal",1)">+</button>
+            </div>
+            <div class="cg-step-row">
+                <span>قلعهٔ سریع</span>
+                <button type="button" class="cg-step" aria-label="کاهش قلعهٔ سریع" @onclick="() => MapCount("fast",-1)">−</button>
+                <b>@Draft.CustomMap.Fast</b>
+                <button type="button" class="cg-step" aria-label="افزایش قلعهٔ سریع" @onclick="() => MapCount("fast",1)">+</button>
+            </div>
+            <div class="cg-step-row">
+                <span>قلعهٔ سنگین</span>
+                <button type="button" class="cg-step" aria-label="کاهش قلعهٔ سنگین" @onclick="() => MapCount("heavy",-1)">−</button>
+                <b>@Draft.CustomMap.Heavy</b>
+                <button type="button" class="cg-step" aria-label="افزایش قلعهٔ سنگین" @onclick="() => MapCount("heavy",1)">+</button>
+            </div>
+            <div class="cg-step-row">
+                <span>برج دفاعی</span>
+                <button type="button" class="cg-step" aria-label="کاهش برج دفاعی" @onclick="() => MapCount("towers",-1)">−</button>
+                <b>@Draft.CustomMap.Towers</b>
+                <button type="button" class="cg-step" aria-label="افزایش برج دفاعی" @onclick="() => MapCount("towers",1)">+</button>
+            </div>
+            <div class="cg-step-row">
+                <span>خلیج در ساحل</span>
+                <button type="button" class="cg-step" aria-label="کاهش خلیج در ساحل" @onclick="() => MapCount("lakes",-1)">−</button>
+                <b>@Draft.CustomMap.Lakes</b>
+                <button type="button" class="cg-step" aria-label="افزایش خلیج در ساحل" @onclick="() => MapCount("lakes",1)">+</button>
+            </div>
+            <div class="cg-step-row">
+                <span>کشتی در دریا</span>
+                <button type="button" class="cg-step" aria-label="کاهش کشتی در دریا" @onclick="() => MapCount("ships",-1)">−</button>
+                <b>@Draft.CustomMap.Ships</b>
+                <button type="button" class="cg-step" aria-label="افزایش کشتی در دریا" @onclick="() => MapCount("ships",1)">+</button>
+            </div>
+            <div class="cg-step-row">
+                <span>قایق در دریا</span>
+                <button type="button" class="cg-step" aria-label="کاهش قایق در دریا" @onclick="() => MapCount("boats",-1)">−</button>
+                <b>@Draft.CustomMap.Boats</b>
+                <button type="button" class="cg-step" aria-label="افزایش قایق در دریا" @onclick="() => MapCount("boats",1)">+</button>
+            </div>
+            @if (MapError is not null)
+            {
+                <p class="cg-foe" role="alert">@MapError</p>
+            }
+            <p class="cg-muted">هر بازیکن یک قلعهٔ شروع می‌گیرد؛ برج‌ها و بقیهٔ قلعه‌ها خنثی‌اند. مجموع نقشه حداکثر ۵۰ ساختمان است.</p>
+            <button type="button" class="cg-btn cg-gold" disabled="@(MapError is not null)" @onclick="() => OnGenerateMap.InvokeAsync(Draft.CustomMap.Copy())">
+                🎲 ساخت و شروع نقشه
+            </button>
+        </fieldset>
+        <div class="cg-actions">
+            <button type="button" class="cg-btn cg-gold" @onclick="Save">ذخیره و بازگشت به بازی</button>
+            <button type="button" class="cg-btn" @onclick="OnClose">انصراف</button>
+        </div>
+        @if (ConfirmReset)
+        {
+            <p>همهٔ مراحل تکمیل‌شده پاک شوند؟</p>
+            <div class="cg-choice-row"><button type="button" class="cg-btn cg-danger" @onclick="Reset">بله، پاک کن</button><button type="button" class="cg-btn" @onclick="() => ConfirmReset = false">انصراف</button></div>
+        }
+        else
+        {
+            <button type="button" class="cg-link cg-foe" @onclick="() => ConfirmReset = true">پاک کردن پیشرفت مراحل</button>
+        }
+    </div>
+</section>
+
+@code {
+    [Parameter] public CastleSettings Settings { get; set; } = new();
+
+    /// <summary>کلید و برچسبِ فارسیِ هر صدا — هم‌ترتیب با SFX_LABELS در موتورِ جاوااسکریپت</summary>
+    private static readonly (string Key, string Label)[] SoundKeys =
+    [
+        ("ambient", "طبیعت"), ("march", "لشکر"), ("capture", "فتح"),
+        ("select", "انتخاب"), ("deselect", "لغو انتخاب"), ("send", "اعزام"),
+        ("lose", "از دست‌دادن"), ("repel", "دفع حمله"), ("upgrade", "رشد"),
+        ("shot", "شلیک"), ("clash", "درگیری"), ("win", "پیروزی"),
+        ("defeat", "شکست"), ("start", "شروع"), ("hover", "نشانگر"),
+    ];
+
+    [Parameter] public EventCallback<CastleSettings> OnSave { get; set; }
+    [Parameter] public EventCallback<RandomMapSettings> OnGenerateMap { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnReset { get; set; }
+    private CastleSettings Draft = new();
+
+    /// <summary>درصدِ یک صدا برای نمایش (گرد‌شده)</summary>
+    private string PercentOf(string key) => ((int)Math.Round(Draft.VolumeOf(key) * 100)).ToString() + "٪";
+
+    /// <summary>گردکردن به دو رقم و محدودکردن به بازه</summary>
+    private static double Round(double value, double min, double max)
+        => Math.Clamp(Math.Round(value * 100) / 100, min, max);
+
+    /// <summary>فاصلهٔ دو قلعهٔ همسایه (±۵ متر)</summary>
+    private void Dist(int dir) => Draft.MinCastleDistance = Math.Clamp(Draft.MinCastleDistance + dir * 5, 0, 120);
+
+    /// <summary>سقفِ تولید (±۱۰ سرباز)</summary>
+    private void Cap(int dir) => Draft.MaxTroopsCap = Math.Clamp(Draft.MaxTroopsCap + dir * 10, 10, 1000);
+
+    /// <summary>قدرت یا سرعتِ یک نوع سرباز (±۰٫۰۵)</summary>
+    private void Unit(string kind, string stat, int dir)
+    {
+        var tuning = Draft.TroopTuning;
+        if (stat == "power")
+        {
+            if (kind == "normal") tuning.NormalPower = Round(tuning.NormalPower + dir * 0.05, 0.5, 4);
+            else if (kind == "fast") tuning.FastPower = Round(tuning.FastPower + dir * 0.05, 0.5, 4);
+            else tuning.HeavyPower = Round(tuning.HeavyPower + dir * 0.05, 0.5, 4);
+        }
+        else
+        {
+            if (kind == "normal") tuning.NormalSpeed = Round(tuning.NormalSpeed + dir * 0.05, 0.4, 2.5);
+            else if (kind == "fast") tuning.FastSpeed = Round(tuning.FastSpeed + dir * 0.05, 0.4, 2.5);
+            else tuning.HeavySpeed = Round(tuning.HeavySpeed + dir * 0.05, 0.4, 2.5);
+        }
+    }
+
+    /// <summary>سرعتِ چرخشِ نورها (±۰٫۰۵)</summary>
+    private void Halo(int dir) => Draft.HaloSpin = Round(Draft.HaloSpin + dir * 0.05, 0, 3);
+
+    /// <summary>شفافیتِ نقطه‌چینِ مسیر حمله (±۰٫۰۵)</summary>
+    private void Dash(int dir) => Draft.AttackDash = Round(Draft.AttackDash + dir * 0.05, 0, 1);
+
+    /// <summary>یک پله روی بلندیِ یک صدا (۰..۱)</summary>
+    private void Vol(string key, int dir) => Draft.SetVolume(key, Round(Draft.VolumeOf(key) + dir * 0.05, 0, 1));
+
+    /// <summary>یک پله روی شمارنده‌های نقشهٔ رندوم</summary>
+    private void MapCount(string field, int dir)
+    {
+        var map = Draft.CustomMap;
+        switch (field)
+        {
+            case "normal": map.Normal = Math.Clamp(map.Normal + dir, 0, 50); break;
+            case "fast": map.Fast = Math.Clamp(map.Fast + dir, 0, 50); break;
+            case "heavy": map.Heavy = Math.Clamp(map.Heavy + dir, 0, 50); break;
+            case "towers": map.Towers = Math.Clamp(map.Towers + dir, 0, 50); break;
+            case "lakes": map.Lakes = Math.Clamp(map.Lakes + dir, 0, 16); break;
+            case "ships": map.Ships = Math.Clamp(map.Ships + dir, 0, 12); break;
+            case "boats": map.Boats = Math.Clamp(map.Boats + dir, 0, 16); break;
+        }
+    }
+
+    /// <summary>همهٔ صداها را کامل می‌کند</summary>
+    private void ResetVolumes()
+    {
+        foreach (var sound in SoundKeys) Draft.SetVolume(sound.Key, 1);
+    }
+
+    /// <summary>
+    /// ذخیره و بستنِ پنل. قبلاً این دکمه وقتی سقفِ نیرو بیرون از بازهٔ ۱..۱۰۰۰ بود
+    /// disabled می‌شد و اگر آن مقدار به هر دلیلی (ذخیرهٔ قدیمی، مقدارِ خالی) خراب
+    /// بود، کاربر هیچ راهی برای بازگشت به بازی نداشت. حالا مقدار اصلاح می‌شود و
+    /// دکمه همیشه کار می‌کند.
+    /// </summary>
+    private async Task Save()
+    {
+        var copy = Draft.Copy();
+        if (copy.MaxTroopsCap is < 1 or > 1000) copy.MaxTroopsCap = 50;
+        if (copy.MinCastleDistance < 0) copy.MinCastleDistance = 0;
+        if (copy.MinCastleDistance > 120) copy.MinCastleDistance = 120;
+        Draft = copy.Copy();
+        await OnSave.InvokeAsync(copy);
+    }
+    private bool ConfirmReset;
+    private string? MapError
+    {
+        get
+        {
+            var m = Draft.CustomMap;
+            if (m.Normal < 0 || m.Fast < 0 || m.Heavy < 0 || m.Towers < 0 || m.Normal > 50 || m.Fast > 50 || m.Heavy > 50 || m.Towers > 50)
+                return "تعداد هر نوع باید بین صفر تا ۵۰ باشد.";
+            if (m.Lakes < 0 || m.Lakes > 16) return "تعداد خلیج باید بین صفر تا ۱۶ باشد.";
+            if (m.Ships < 0 || m.Ships > 12) return "تعداد کشتی باید بین صفر تا ۱۲ باشد.";
+            if (m.Boats < 0 || m.Boats > 16) return "تعداد قایق باید بین صفر تا ۱۶ باشد.";
+            if (m.Normal + m.Fast + m.Heavy < m.Players)
+                return "برای هر بازیکن یک قلعه لازم است؛ برج پایگاه شروع نیست.";
+            if (m.Normal + m.Fast + m.Heavy + m.Towers > 50)
+                return "نقشه برای حفظ فاصلهٔ قلعه‌ها حداکثر ۵۰ ساختمان می‌تواند داشته باشد.";
+            return null;
+        }
+    }
+    protected override void OnInitialized()
+    {
+        Draft = Settings.Copy();
+        Draft.CustomMap ??= new RandomMapSettings();
+    }
+    private async Task Reset() { await OnReset.InvokeAsync(); ConfirmReset = false; }
+}

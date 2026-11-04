@@ -1,0 +1,30 @@
+{
+  "name": "Castle Game - Blazor Server .NET 9",
+  "download": "/downloads/castle-blazor-net9.zip",
+  "files": [
+    ".gitignore",
+    "CastleGame.Blazor.csproj",
+    "Host/App.razor",
+    "Host/Home.razor",
+    "Host/Routes.razor",
+    "Host/_Imports.razor",
+    "Program.cs",
+    "README.fa.md",
+    "wwwroot/قلعه/castle.js",
+    "بازیها/قلعه/CastleGamePage.razor",
+    "بازیها/قلعه/CastleGamePage.razor.cs",
+    "بازیها/قلعه/CastleGamePage.razor.css",
+    "بازیها/قلعه/CastleGameService.cs",
+    "بازیها/قلعه/CastleHelp.razor",
+    "بازیها/قلعه/CastleHud.razor",
+    "بازیها/قلعه/CastleLevels.razor",
+    "بازیها/قلعه/CastleLevelsData.cs",
+    "بازیها/قلعه/CastleModels.cs",
+    "بازیها/قلعه/CastleSettingsModal.razor",
+    "بازیها/قلعه/_Imports.razor"
+  ],
+  "bytes": 72416,
+  "entryPage": "بازیها/قلعه/CastleGamePage.razor",
+  "staticScript": "wwwroot/قلعه/castle.js",
+  "route": "/games/castle"
+}

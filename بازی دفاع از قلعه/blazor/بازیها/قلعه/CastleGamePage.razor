@@ -1,0 +1,115 @@
+@page "/games/castle"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+@inject CastleGameService GameService
+@implements IAsyncDisposable
+
+<PageTitle>نبرد قلعه‌ها</PageTitle>
+
+<div class="castle-root" dir="rtl" style="@RotationCss">
+    <button type="button" class="cg-rotate" aria-label="چرخش بازی" title="چرخش بازی ۹۰ درجه" @onclick="RotateView">
+        <span class="cg-rotate-icon" aria-hidden="true" style="@($"transform: rotate({Rotation * 90}deg)")">⟳</span>
+        <span class="cg-rotate-text">
+            <b>چرخش صفحه</b>
+            <i>@(Rotation == 0 ? "بدون چرخش" : $"{Rotation * 90} درجه")</i>
+        </span>
+    </button>
+    <canvas @ref="Canvas" class="cg-canvas" tabindex="0" aria-label="میدان نبرد قلعه‌ها"></canvas>
+    <div class="cg-vignette" aria-hidden="true"></div>
+
+    @if (!Ready)
+    {
+        <div class="cg-overlay">
+            <div class="cg-dialog cg-loading" role="status">
+                <span class="cg-eyebrow">نبرد قلعه‌ها</span>
+                <h1>@(Error is null ? "آماده‌سازی میدان نبرد" : "بازی بارگذاری نشد")</h1>
+                <p>@(Error ?? "در حال بارگذاری موتور محلی بازی...")</p>
+                @if (Error is not null)
+                {
+                    <p class="cg-muted">وجود فایل wwwroot/قلعه/castle.js و فعال‌بودن Interactive Server را بررسی کنید.</p>
+                    <button type="button" class="cg-btn cg-gold" @onclick="Reload">بارگذاری دوباره</button>
+                }
+            </div>
+        </div>
+    }
+    else if (Screen == GameScreen.Menu)
+    {
+        <section class="cg-menu">
+            <span class="cg-eyebrow">لشکرکشی راهبردی</span>
+            <h1>نبردِ قلعه‌ها</h1>
+            <p>کلیک را نگه دار و از روی قلعه‌ها رد شو. نیروهایت را جمع کن، مسیر حمله را بساز و فرمانروای میدان شو.</p>
+            @if (BattleInMenu)
+            {
+                @* کارتِ «نبردِ متوقف‌شده» لازم نیست: یک دکمهٔ ثابت در گوشهٔ صفحه کافی است *@
+                <button type="button" class="cg-btn cg-gold cg-resume-pill" @onclick="ResumeFromMenu"
+                        title="ادامهٔ @BattleLabel">بازگشت به بازی ▸</button>
+            }
+            <div class="cg-actions">
+                <button type="button" class="cg-btn cg-gold cg-large" @onclick="Play">شروع مرحله‌ای</button>
+                <button type="button" class="cg-btn" @onclick="StartSavedRandomMap">🎲 نقشهٔ رندوم</button>
+                <button type="button" class="cg-btn" @onclick="OpenLevels">مراحل</button>
+                <button type="button" class="cg-btn" @onclick="OpenSettings">تنظیمات</button>
+                <button type="button" class="cg-btn" @onclick="OpenHelp">راهنما</button>
+            </div>
+            <p class="cg-muted">انتقال به قلعهٔ خودی: فقط با دوبار کلیک</p>
+        </section>
+    }
+    else if (Screen == GameScreen.Playing)
+    {
+        <CastleHud State="State" LevelName="@State.LevelName" OnPercent="SetPercent" OnZoom="Zoom"
+                   OnPause="Pause" />
+    }
+    else if (Screen == GameScreen.Settings)
+    {
+        <div class="cg-overlay"><CastleSettingsModal Settings="GameService.Settings" OnSave="SaveRules" OnGenerateMap="GenerateRandomMap" OnClose="ClosePanel" OnReset="ResetProgress" /></div>
+    }
+    else if (Screen == GameScreen.Levels)
+    {
+        <div class="cg-overlay"><CastleLevels Settings="GameService.Settings" OnPick="StartLevel" OnBack="ClosePanel" /></div>
+    }
+    else if (Screen == GameScreen.Help)
+    {
+        <div class="cg-overlay"><CastleHelp OnBack="ClosePanel" /></div>
+    }
+    else if (Screen == GameScreen.Paused)
+    {
+        <div class="cg-overlay">
+            <section class="cg-dialog cg-center" role="dialog" aria-modal="true" aria-label="توقف بازی">
+                <span class="cg-eyebrow">@(State.IsCustom ? State.LevelName : $"مرحله {State.LevelIndex + 1}: {State.LevelName}")</span>
+                <h2>نبرد متوقف شد</h2>
+                <div class="cg-actions">
+                    <button type="button" class="cg-btn cg-gold" @onclick="Resume">ادامهٔ نبرد</button>
+                    <button type="button" class="cg-btn" @onclick="Restart">شروع دوباره</button>
+                    <button type="button" class="cg-btn" @onclick="OpenSettings">تنظیمات</button>
+                    <button type="button" class="cg-btn" @onclick="OpenLevels">مراحل</button>
+                    <button type="button" class="cg-btn" @onclick="Menu">منوی اصلی</button>
+                </div>
+            </section>
+        </div>
+    }
+    else if (Screen == GameScreen.Ended)
+    {
+        <div class="cg-overlay">
+            <section class="cg-dialog cg-center" role="dialog" aria-modal="true" aria-label="نتیجهٔ بازی">
+                <span class="cg-eyebrow">پایان نبرد</span>
+                <h2 class="@(State.Win == true ? "cg-ally" : "cg-foe")">@(State.Win == true ? "پیروزی!" : "شکست")</h2>
+                <p>@(State.Win == true ? State.IsCustom ? "نقشهٔ رندوم را فتح کردی!" : State.LevelIndex == 29 ? "همهٔ ۳۰ مرحله را فتح کردی!" : "مرحلهٔ بعد باز شد." : "قلعه‌هایت را از دست دادی؛ دوباره تلاش کن.")</p>
+                <div class="cg-actions">
+                    @if (State.Win == true && !State.IsCustom && State.LevelIndex < 29)
+                    {
+                        <button type="button" class="cg-btn cg-gold" @onclick="Next">مرحلهٔ بعد</button>
+                    }
+                    <button type="button" class="cg-btn" @onclick="Restart">بازی دوباره</button>
+                    <button type="button" class="cg-btn" @onclick="OpenLevels">مراحل</button>
+                    <button type="button" class="cg-btn" @onclick="Menu">منوی اصلی</button>
+                </div>
+            </section>
+        </div>
+    }
+
+    @if (Ready && !string.IsNullOrEmpty(State.Message) && Screen == GameScreen.Playing)
+    {
+        <div class="cg-toast" role="status">@State.Message</div>
+    }
+</div>

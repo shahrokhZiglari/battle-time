@@ -1,0 +1,523 @@
+@import "tailwindcss";
+
+@theme {
+  /* بدون وابستگی به فونت اینترنتی: فقط فونت‌های نصب‌شده روی سیستم یا جایگزین پیش‌فرض مرورگر */
+  --font-display: "Vazirmatn", "Tahoma", "Segoe UI", "Arial", system-ui, sans-serif;
+  --font-body: "Vazirmatn", "Tahoma", "Segoe UI", "Arial", system-ui, sans-serif;
+
+  --color-abyss: #05131a;
+  --color-petrol: #0a212c;
+  --color-petrol-2: #103243;
+  --color-petrol-3: #1b4a5e;
+  --color-brass: #e8b44c;
+  --color-brass-2: #c8912f;
+  --color-brass-3: #7d5a17;
+  --color-ally: #3ddc84;
+  --color-ally-2: #0f7a4a;
+  --color-foe: #ff5f57;
+  --color-foe-2: #a52a24;
+  --color-bone: #f6efe2;
+  --color-ash: #9fb4bd;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    font-family: var(--font-body);
+    background: #05131a;
+    color: var(--color-bone);
+    overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+    text-rendering: optimizeLegibility;
+  }
+  button {
+    font-family: inherit;
+    cursor: pointer;
+  }
+  ::selection {
+    background: var(--color-brass);
+    color: #06171f;
+  }
+}
+
+/* ---------- ambience ---------- */
+.app-bg {
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(120% 80% at 80% -10%, #14495c 0%, transparent 55%),
+    radial-gradient(90% 70% at 10% 110%, #123a34 0%, transparent 60%),
+    linear-gradient(180deg, #071a23 0%, #05131a 60%, #041016 100%);
+}
+.grain::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.28;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/></filter><rect width='140' height='140' filter='url(%23n)' opacity='.5'/></svg>");
+}
+.scanlines::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.16;
+  background: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.09) 0 1px, transparent 1px 4px);
+}
+
+/* ---------- plates & buttons ---------- */
+.plate {
+  position: relative;
+  background:
+    linear-gradient(160deg, rgba(27, 74, 94, 0.72) 0%, rgba(10, 33, 44, 0.94) 45%, rgba(5, 19, 26, 0.97) 100%);
+  border: 1px solid rgba(232, 180, 76, 0.22);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 0 -22px 40px rgba(0, 0, 0, 0.35),
+    0 24px 60px -18px rgba(0, 0, 0, 0.85);
+  clip-path: polygon(18px 0, 100% 0, 100% calc(100% - 18px), calc(100% - 18px) 100%, 0 100%, 0 18px);
+}
+.plate-tight {
+  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+}
+.btn {
+  position: relative;
+  overflow: hidden;
+  transition:
+    transform 0.16s cubic-bezier(0.2, 0.9, 0.3, 1.4),
+    box-shadow 0.2s,
+    background-color 0.2s,
+    color 0.2s,
+    border-color 0.2s;
+  clip-path: polygon(9px 0, 100% 0, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%, 0 9px);
+}
+.btn:active:not(:disabled) {
+  transform: translateY(2px) scale(0.985);
+}
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.btn::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -60%;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+  transform: skewX(-18deg);
+  transition: right 0.5s ease;
+  pointer-events: none;
+}
+.btn:hover:not(:disabled)::after {
+  right: 120%;
+}
+.btn-brass {
+  background: linear-gradient(180deg, #f0c264 0%, #d59c33 55%, #a4731f 100%);
+  color: #24160a;
+  border: 1px solid #f6d68f;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    0 8px 20px -6px rgba(232, 180, 76, 0.6);
+}
+.btn-brass:hover:not(:disabled) {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 12px 28px -6px rgba(232, 180, 76, 0.85);
+}
+.btn-steel {
+  background: linear-gradient(180deg, rgba(34, 84, 105, 0.95), rgba(12, 38, 50, 0.95));
+  color: #dcecf2;
+  border: 1px solid rgba(159, 205, 222, 0.28);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.btn-steel:hover:not(:disabled) {
+  border-color: rgba(232, 180, 76, 0.7);
+  color: #fff;
+  background: linear-gradient(180deg, rgba(44, 104, 128, 0.98), rgba(16, 48, 62, 0.98));
+}
+.btn-ally {
+  background: linear-gradient(180deg, #43e08a, #16915a);
+  color: #04240f;
+  border: 1px solid #86f0b6;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    0 8px 22px -8px rgba(61, 220, 132, 0.7);
+}
+
+/* ---------- level tiles ---------- */
+.tile {
+  position: relative;
+  overflow: hidden;
+  transition:
+    transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.3),
+    box-shadow 0.22s,
+    border-color 0.22s;
+}
+.tile:hover:not(:disabled) {
+  transform: translateY(-6px) rotate(-0.4deg);
+}
+.tile .num {
+  font-family: var(--font-display);
+  transition: transform 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.5);
+}
+.tile:hover:not(:disabled) .num {
+  transform: scale(1.14) rotate(3deg);
+}
+
+/* ---------- motion ---------- */
+@keyframes riseIn {
+  from {
+    opacity: 0;
+    transform: translateY(26px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes slideRight {
+  from {
+    opacity: 0;
+    transform: translateX(-30px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes bannerSweep {
+  0% {
+    opacity: 0;
+    transform: translateY(-18px) scale(1.1);
+    letter-spacing: 0.3em;
+  }
+  18% {
+    opacity: 1;
+    transform: none;
+    letter-spacing: normal;
+  }
+  82% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+@keyframes toastIn {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 18px) scale(0.9);
+  }
+  12% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -12px);
+  }
+}
+@keyframes pulseRing {
+  0% {
+    box-shadow: 0 0 0 0 rgba(232, 180, 76, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 14px rgba(232, 180, 76, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(232, 180, 76, 0);
+  }
+}
+@keyframes floatY {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-7px);
+  }
+}
+@keyframes spinSlow {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* ---- نمودار راهنما: کشیدن نشانگر روی قلعه‌ها ---- */
+@keyframes cursorSwipe {
+  0%,
+  5% {
+    transform: translate(0, 0);
+    opacity: 1;
+  }
+  26% {
+    transform: translate(74px, 32px);
+  }
+  48% {
+    transform: translate(118px, -16px);
+  }
+  72% {
+    transform: translate(198px, -32px);
+  }
+  86% {
+    transform: translate(198px, -32px);
+    opacity: 1;
+  }
+  93%,
+  100% {
+    transform: translate(198px, -32px);
+    opacity: 0;
+  }
+}
+@keyframes trailReveal {
+  0%,
+  4% {
+    stroke-dashoffset: 1;
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  72% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  90% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  96%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+@keyframes allyGlowImmediate {
+  0%,
+  90% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  96%,
+  100% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+@keyframes allyGlowAt26 {
+  0%,
+  24% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  28%,
+  90% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  96%,
+  100% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+@keyframes allyGlowAt48 {
+  0%,
+  46% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  50%,
+  90% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  96%,
+  100% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+@keyframes impactFlash {
+  0%,
+  70% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  76% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+  88% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+}
+@keyframes targetPing {
+  0%,
+  70% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  80% {
+    opacity: 1;
+    transform: scale(1.25);
+  }
+  90% {
+    opacity: 0.6;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.4);
+  }
+}
+@keyframes arrowDraw {
+  0%,
+  60% {
+    stroke-dashoffset: 120;
+    opacity: 0;
+  }
+  72% {
+    opacity: 1;
+  }
+  85%,
+  94% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+
+.anim-rise {
+  animation: riseIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.anim-slide {
+  animation: slideRight 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.anim-banner {
+  animation: bannerSweep 2.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.anim-toast {
+  animation: toastIn 2.1s ease both;
+}
+.anim-float {
+  animation: floatY 4.5s ease-in-out infinite;
+}
+.anim-spin-slow {
+  animation: spinSlow 22s linear infinite;
+}
+.anim-ping-target {
+  animation: targetPing 3.6s ease-out infinite;
+}
+.pulse-ring {
+  animation: pulseRing 2s ease-out infinite;
+}
+
+.cursor-demo2 {
+  animation: cursorSwipe 3.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+.trail-demo {
+  stroke-dasharray: 1;
+  animation: trailReveal 3.6s linear infinite;
+}
+.glow-demo-1 {
+  animation: allyGlowImmediate 3.6s linear infinite;
+}
+.glow-demo-2 {
+  animation: allyGlowAt26 3.6s linear infinite;
+}
+.glow-demo-3 {
+  animation: allyGlowAt48 3.6s linear infinite;
+}
+.impact-demo {
+  background: radial-gradient(circle, rgba(255, 209, 102, 0.85), rgba(255, 95, 87, 0.3) 55%, transparent 75%);
+  animation: impactFlash 3.6s linear infinite;
+}
+
+.hide {
+  display: none !important;
+}
+
+.thin-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: rgba(232, 180, 76, 0.35);
+  border-radius: 99px;
+}
+.thin-scroll::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 99px;
+  background: linear-gradient(90deg, var(--color-brass) 0%, var(--color-brass-3) 100%);
+  outline: none;
+}
+/* اسلایدرِ ریزِ پنلِ تنظیمات: ریلِ نازک و دستهٔ کوچک، ولی جعبهٔ لمس به‌اندازهٔ
+   کافی بلند می‌ماند تا روی گوشی با هر ضربه جابه‌جا شود */
+input[type="range"].range-mini {
+  height: 16px;
+  background: transparent;
+}
+input[type="range"].range-mini::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 99px;
+  background: linear-gradient(90deg, var(--color-brass) 0%, var(--color-brass-3) 100%);
+}
+input[type="range"].range-mini::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border-radius: 50%;
+  border: 1.5px solid #2a1c07;
+  background: radial-gradient(circle at 35% 30%, #ffe6ab, #d59c33);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+}
+input[type="range"].range-mini::-moz-range-track {
+  height: 4px;
+  border-radius: 99px;
+  background: linear-gradient(90deg, var(--color-brass) 0%, var(--color-brass-3) 100%);
+}
+input[type="range"].range-mini::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid #2a1c07;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ffe6ab, #d59c33);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ffe6ab, #d59c33);
+  border: 2px solid #2a1c07;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}

@@ -1,0 +1,56 @@
+<div class="cg-hud-top">
+    <div class="cg-hud-title">
+        <span class="cg-eyebrow">نبرد قلعه‌ها</span>
+        <strong>@(State.IsCustom ? LevelName : $"مرحله {State.LevelIndex + 1}: {LevelName}")</strong>
+        <span class="cg-muted">زمان @TimeSpan.FromSeconds(State.TimeSeconds).ToString(@"mm\:ss")</span>
+        <span id="castle-selection" class="cg-sel" aria-live="polite">انتخاب: <b>@State.SelectedCount</b> قلعه · <b>@State.SelectedTroops</b> نفر</span>
+    </div>
+    <div class="cg-balance" aria-label="توازن قوا">
+        <div class="cg-faction-list" style="--faction-count:@Math.Min(State.Factions.Count, 2)">
+            @foreach (var faction in State.Factions)
+            {
+                <div class="cg-faction" title="@faction.Castles قلعه">
+                    <span class="cg-faction-dot" style="background-color:@faction.Color"></span>
+                    <strong style="color:@faction.Color">@faction.Name</strong>
+                    <span class="cg-muted">@faction.Troops / @Math.Round(faction.Power, 1)</span>
+                </div>
+            }
+        </div>
+        <div class="cg-powerbar" aria-label="توان رزمی بازیکنان">
+            @foreach (var faction in State.Factions)
+            {
+                <span title="@faction.Name: @Math.Round(faction.Power, 1) توان" style="width:@Share(faction.Power)%;background-color:@faction.Color"></span>
+            }
+        </div>
+        <div class="cg-faction-subtitle">توان رزمی بازیکنان · تعداد سرباز / توان</div>
+    </div>
+    <div class="cg-controls">
+        <span class="cg-muted">اعزام</span>
+        @if (State.LargeMap)
+        {
+            <div class="cg-zoom-controls" aria-label="بزرگ‌نمایی نقشه">
+                <button type="button" class="cg-btn cg-zoom-step" disabled="@(State.Zoom <= 1)" aria-label="کوچک‌نمایی" title="کوچک‌نمایی" @onclick="() => OnZoom.InvokeAsync(-0.15)">−</button>
+                <button type="button" class="cg-btn cg-zoom-value" title="بازنشانی زوم" @onclick="() => OnZoom.InvokeAsync(0)">@(Math.Round(State.Zoom * 100))٪</button>
+                <button type="button" class="cg-btn cg-zoom-step" disabled="@(State.Zoom >= 3)" aria-label="بزرگ‌نمایی" title="بزرگ‌نمایی" @onclick="() => OnZoom.InvokeAsync(0.15)">+</button>
+            </div>
+        }
+        @foreach (var pct in new[] { 20, 60, 80 })
+        {
+            <button type="button" class="cg-btn @(State.Percent == pct ? "cg-gold" : "")"
+                    aria-pressed="@(State.Percent == pct)" @onclick="() => OnPercent.InvokeAsync(pct)">@(pct)%</button>
+        }
+        @* نوارِ بالا تنها یک دکمه دارد: توقف. هر جای دیگری از نبرد (منو، مراحل،
+           تنظیمات) از پنلِ توقف باز می‌شود و پنل همیشه «ادامهٔ نبرد» را دارد. *@
+        <button type="button" class="cg-btn cg-gold" @onclick="OnPause">توقف</button>
+    </div>
+</div>
+
+@code {
+    [Parameter] public CastleSnapshot State { get; set; } = new();
+    [Parameter] public string LevelName { get; set; } = "";
+    [Parameter] public EventCallback<int> OnPercent { get; set; }
+    [Parameter] public EventCallback<double> OnZoom { get; set; }
+    [Parameter] public EventCallback OnPause { get; set; }
+    private double TotalPower => Math.Max(1, State.Factions.Sum(faction => faction.Power));
+    private double Share(double power) => 100.0 * power / TotalPower;
+}

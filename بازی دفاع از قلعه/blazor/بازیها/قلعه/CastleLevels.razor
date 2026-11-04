@@ -1,0 +1,25 @@
+<section class="cg-dialog cg-wide" role="dialog" aria-modal="true" aria-labelledby="cg-levels-title">
+    <div class="cg-dialog-head">
+        <div><span class="cg-eyebrow">لشکرکشی</span><h2 id="cg-levels-title">مراحل نبرد</h2></div>
+        <button type="button" class="cg-btn" @onclick="OnBack">بازگشت</button>
+    </div>
+    <div class="cg-level-grid">
+        @foreach (var level in CastleLevelsData.All)
+        {
+            var open = level.Index < Settings.UnlockedLevel;
+            var done = Settings.CompletedLevels.Contains(level.Index);
+            <button type="button" disabled="@(!open)" class="cg-level" @onclick="() => OnPick.InvokeAsync(level.Index)">
+                <span class="cg-level-number">@(level.Index + 1)</span>
+                <strong>@level.Name</strong>
+                <span class="cg-muted">@(done ? "تکمیل‌شده" : open ? "آمادهٔ نبرد" : "قفل است")</span>
+                <small>@level.Hint</small>
+            </button>
+        }
+    </div>
+</section>
+
+@code {
+    [Parameter] public CastleSettings Settings { get; set; } = new();
+    [Parameter] public EventCallback<int> OnPick { get; set; }
+    [Parameter] public EventCallback OnBack { get; set; }
+}

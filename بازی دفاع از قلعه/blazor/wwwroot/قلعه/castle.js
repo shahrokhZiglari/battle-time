@@ -1,0 +1,3921 @@
+// Castle game for Blazor Server .NET 9. No CDN or React runtime.
+// Low-poly 2.5D islands, stone bridges, faceted keeps and individual soldiers.
+// Shared gameplay engine with 30 campaign stages and customizable random maps.
+var __defProp = Object.defineProperty;
+var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
+
+// src/game/config.ts
+var THEME_COUNT = 5;
+var CFG = {
+  W: 1e3,
+  H: 600,
+  spawn: { barracks: 2, tower: 0, speed: 3, heavy: 3 },
+  cap: 50,
+  neutralCap: 10,
+  capStart: 20,
+  capStep: 10,
+  capHold: 5,
+  speed: 110,
+  range: 150,
+  shot: 1,
+  /** آسیبِ هر شلیکِ برجِ خنثی به لشکرِ رهگذر */
+  neutralShotDamage: 0.5,
+  def: { barracks: 1, tower: 1.5, speed: 1, heavy: 1 }
+};
+var TROOP_TYPES = ["normal", "fast", "heavy"];
+var UNITS = {
+  normal: { label: "عادی", power: 1, speed: 1 },
+  fast: { label: "سریع", power: 1, speed: 1.5 },
+  heavy: { label: "سنگین", power: 2, speed: 2 / 3 }
+};
+var UNIT_LIMITS = { power: [0.5, 4], speed: [0.4, 2.5] };
+var DEFAULT_UNIT_TUNING = {
+  normal: { power: 1, speed: 1 },
+  fast: { power: 1, speed: 1.5 },
+  heavy: { power: 2, speed: 2 / 3 }
+};
+var clampNumber = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+function normalizeUnitTuning(raw) {
+  const out = {};
+  for (const type of TROOP_TYPES) {
+    const src = raw?.[type];
+    const fallback = DEFAULT_UNIT_TUNING[type];
+    const power = Number(src?.power);
+    const speed = Number(src?.speed);
+    out[type] = {
+      power: Number.isFinite(power) ? Math.round(clampNumber(power, ...UNIT_LIMITS.power) * 100) / 100 : fallback.power,
+      speed: Number.isFinite(speed) ? Math.round(clampNumber(speed, ...UNIT_LIMITS.speed) * 100) / 100 : fallback.speed
+    };
+  }
+  return out;
+}
+function applyUnitTuning(raw) {
+  const tuning = normalizeUnitTuning(raw);
+  for (const type of TROOP_TYPES) {
+    UNITS[type].power = tuning[type].power;
+    UNITS[type].speed = tuning[type].speed;
+  }
+  return tuning;
+}
+var DEFAULT_HALO_SPIN = 1.35;
+var HALO_SPIN_LIMITS = [0, 3];
+var normalizeHaloSpin = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(clampNumber(n, ...HALO_SPIN_LIMITS) * 100) / 100 : DEFAULT_HALO_SPIN;
+};
+var DEFAULT_ATTACK_DASH = 1;
+var ATTACK_DASH_LIMITS = [0, 1];
+var normalizeAttackDash = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(clampNumber(n, ...ATTACK_DASH_LIMITS) * 100) / 100 : DEFAULT_ATTACK_DASH;
+};
+var BUILDING_LABELS = {
+  barracks: "قلعهٔ عادی",
+  speed: "قلعهٔ سریع",
+  heavy: "قلعهٔ سنگین",
+  tower: "برج دفاعی"
+};
+var COL = { 0: "#cfd8dc", 1: "#3ddc84", 2: "#ff5f57", 3: "#55b7ff", 4: "#c084fc" };
+var DK = { 0: "#78909c", 1: "#12855a", 2: "#a52a24", 3: "#2169a5", 4: "#7442a0" };
+var INTRO_LEVELS = [
+  {
+    name: "آموزش",
+    ai: 0.25,
+    hint: "کلیک چپ را روی یک قلعهٔ سبز نگه دار و نشانگر را حرکت بده؛ هر قلعهٔ سبزی که از رویش رد شوی انتخاب می‌شود. سپس روی قلعهٔ هدف رها کن.",
+    b: [
+      [150, 300, 1, "barracks", 25],
+      [500, 300, 0, "barracks", 8],
+      [850, 300, 2, "barracks", 10]
+    ]
+  },
+  {
+    name: "تصرف",
+    ai: 0.45,
+    hint: "ساختمان‌های خنثی را زودتر از دشمن بگیر تا تولید نیرویت بیشتر شود.",
+    b: [
+      [110, 300, 1, "barracks", 25],
+      [380, 140, 0, "speed", 8],
+      [380, 460, 0, "barracks", 8],
+      [620, 140, 0, "barracks", 10],
+      [620, 460, 0, "heavy", 10],
+      [890, 300, 2, "barracks", 22]
+    ]
+  },
+  {
+    name: "دشمن قوی",
+    ai: 0.7,
+    hint: "دشمن ساختمان بیشتری دارد؛ ابتدا اقتصادت را بساز و بعد با انتخاب گروهی حمله کن.",
+    b: [
+      [100, 300, 1, "barracks", 30],
+      [300, 120, 0, "barracks", 10],
+      [300, 480, 0, "heavy", 10],
+      [500, 300, 0, "tower", 15],
+      [700, 140, 2, "barracks", 18],
+      [700, 460, 2, "heavy", 18],
+      [900, 300, 2, "barracks", 25]
+    ]
+  },
+  {
+    name: "تاکتیک",
+    ai: 0.85,
+    hint: "سرباز سریع دو برابر تندتر است؛ سرباز سنگین دو برابر قدرت دارد اما با سرعت دوسوم حرکت می‌کند.",
+    b: [
+      [100, 300, 1, "barracks", 30],
+      [300, 120, 0, "speed", 8],
+      [300, 480, 0, "tower", 12],
+      [500, 190, 0, "barracks", 10],
+      [500, 410, 0, "heavy", 10],
+      [720, 300, 2, "tower", 20],
+      [760, 110, 2, "speed", 10],
+      [760, 490, 2, "heavy", 15],
+      [910, 300, 2, "barracks", 28]
+    ]
+  },
+  {
+    name: "نبرد نهایی",
+    ai: 1,
+    hint: "ظرفیت قلعه‌های خودی و دشمن پس از ۵ ثانیه پُر بودن، خودکار ۱۰ نفر بیشتر می‌شود. نیروها را گروهی و هوشمندانه اعزام کن!",
+    b: [
+      [90, 300, 1, "barracks", 40],
+      [270, 490, 1, "heavy", 15],
+      [300, 130, 0, "barracks", 12],
+      [300, 300, 0, "tower", 15],
+      [460, 450, 0, "speed", 10],
+      [460, 150, 0, "heavy", 12],
+      [610, 300, 2, "speed", 20],
+      [760, 140, 2, "tower", 30],
+      [760, 460, 2, "tower", 30],
+      [920, 300, 2, "heavy", 50]
+    ]
+  }
+];
+var fa = (n) => Number(n).toLocaleString("fa-IR");
+function makeCampaignLevel(stage) {
+  const playerStarts = [[100, 300], [150, 150]];
+  const enemyStarts = [[900, 300], [850, 140], [850, 460], [790, 300]];
+  const neutralSpots = [
+    [300, 300],
+    [300, 150],
+    [300, 450],
+    [440, 150],
+    [440, 450],
+    [560, 150],
+    [560, 450],
+    [700, 300],
+    [700, 150],
+    [700, 450],
+    [500, 220],
+    [500, 380],
+    [650, 220]
+  ];
+  const castleTypes = ["barracks", "speed", "heavy"];
+  const neutralTypes = ["barracks", "speed", "heavy", "tower"];
+  const playerCount = stage >= 19 ? 2 : 1;
+  const enemyCount = Math.min(4, 1 + Math.floor((stage - 6) / 8));
+  const neutralCount = Math.min(neutralSpots.length, 2 + Math.floor((stage - 6) / 3));
+  const buildings = [];
+  for (let i = 0; i < playerCount; i++) {
+    const type = castleTypes[(stage + i * 2) % castleTypes.length];
+    const [x, y] = playerStarts[i];
+    buildings.push([x, y, 1, type, Math.min(50, 27 + Math.floor(stage * 0.45))]);
+  }
+  for (let i = 0; i < neutralCount; i++) {
+    const type = neutralTypes[(stage + i * 3) % neutralTypes.length];
+    const [x, y] = neutralSpots[i];
+    buildings.push([x, y, 0, type, 5 + (stage * 2 + i * 3) % 6]);
+  }
+  for (let i = 0; i < enemyCount; i++) {
+    const type = castleTypes[(stage * 2 + i) % castleTypes.length];
+    const [x, y] = enemyStarts[i];
+    buildings.push([x, y, 2, type, Math.min(50, 18 + Math.floor(stage * 0.85) + i * 2)]);
+  }
+  return {
+    name: "نبرد " + stage.toLocaleString("fa-IR"),
+    ai: Math.min(1, 0.3 + (stage - 6) * 0.027),
+    hint: "قلعه‌های خنثی را بگیر، ترکیب سربازها را بسنج و ظرفیت قلعه‌ها را با پُر نگه‌داشتن خودکار افزایش بده.",
+    b: buildings
+  };
+}
+var LEVELS = [
+  ...INTRO_LEVELS,
+  ...Array.from({ length: 25 }, (_, i) => makeCampaignLevel(i + INTRO_LEVELS.length + 1))
+];
+var defOf = (b) => CFG.def[b.type];
+
+// src/game/nature-audio.ts
+var ac = null;
+var master = null;
+var ambientGain = null;
+var ambientTimer = null;
+var ambientOn = false;
+var marchOn = false;
+var marchGain = null;
+var marchTimer = null;
+var noiseBuffer = null;
+var layerVolume = { ambient: 1, march: 1 };
+function audio() {
+  try {
+    if (!ac) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      ac = new AC();
+      master = ac.createGain();
+      master.gain.value = 0.9;
+      master.connect(ac.destination);
+    }
+    if (ac.state === "suspended") void ac.resume();
+    return ac;
+  } catch {
+    return null;
+  }
+}
+function noise(a) {
+  if (noiseBuffer) return noiseBuffer;
+  const length = a.sampleRate * 2;
+  const buffer = a.createBuffer(1, length, a.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+  noiseBuffer = buffer;
+  return buffer;
+}
+function windLayer(a, destination, gain, rate) {
+  const source = a.createBufferSource();
+  source.buffer = noise(a);
+  source.loop = true;
+  const filter = a.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.value = 420;
+  const g = a.createGain();
+  g.gain.value = gain;
+  source.connect(filter).connect(g).connect(destination);
+  source.start(a.currentTime + rate);
+  return { source, g, filter };
+}
+function setNatureSound(kind, on) {
+  const a = audio();
+  if (!a || !master) {
+    if (!on) stopAllNature();
+    return;
+  }
+  if (kind === "ambient") {
+    ambientOn = on;
+    if (on) startAmbient(a);
+    else stopAmbient();
+  } else if (kind === "march") {
+    marchOn = on;
+    if (on) startMarch(a);
+    else stopMarch();
+  }
+}
+function setNatureVolume(kind, value) {
+  const v = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 1));
+  layerVolume[kind] = v;
+  const a = ac;
+  if (!a) return;
+  if (kind === "ambient" && ambientGain) ambientGain.gain.setTargetAtTime(0.9 * v, a.currentTime, 0.15);
+  if (kind === "march" && marchGain) marchGain.gain.setTargetAtTime(0.85 * v, a.currentTime, 0.15);
+}
+function startAmbient(a) {
+  if (ambientTimer !== null) return;
+  ambientGain = a.createGain();
+  ambientGain.gain.value = 0;
+  ambientGain.connect(master);
+  windLayer(a, ambientGain, 0.05 * layerVolume.ambient, 0);
+  const chirp = () => {
+    if (!ambientOn || !ambientGain) return;
+    const now = a.currentTime;
+    const osc = a.createOscillator();
+    const g = a.createGain();
+    osc.type = "sine";
+    const base = 1400 + Math.random() * 900;
+    osc.frequency.setValueAtTime(base, now);
+    osc.frequency.exponentialRampToValueAtTime(base * (1.3 + Math.random() * 0.5), now + 0.07);
+    osc.frequency.exponentialRampToValueAtTime(base * 0.85, now + 0.16);
+    g.gain.setValueAtTime(0, now);
+    g.gain.linearRampToValueAtTime(0.035 * layerVolume.ambient, now + 0.02);
+    g.gain.exponentialRampToValueAtTime(8e-4, now + 0.3);
+    osc.connect(g).connect(ambientGain);
+    osc.start(now);
+    osc.stop(now + 0.34);
+    ambientGain.gain.linearRampToValueAtTime(0.9 * layerVolume.ambient, now + 2.5);
+    ambientTimer = window.setTimeout(chirp, 1400 + Math.random() * 3200);
+  };
+  ambientTimer = window.setTimeout(chirp, 700);
+}
+function stopAmbient() {
+  if (ambientTimer !== null) {
+    clearTimeout(ambientTimer);
+    ambientTimer = null;
+  }
+  if (ambientGain && ac) {
+    const g = ambientGain;
+    g.gain.cancelScheduledValues(ac.currentTime);
+    g.gain.linearRampToValueAtTime(0, ac.currentTime + 0.6);
+    window.setTimeout(() => {
+      try {
+        g.disconnect();
+      } catch {
+      }
+    }, 800);
+  }
+  ambientGain = null;
+  ambientOn = false;
+}
+function startMarch(a) {
+  if (marchTimer !== null) return;
+  marchGain = a.createGain();
+  marchGain.gain.value = 0;
+  marchGain.connect(master);
+  const step = () => {
+    if (!marchOn || !marchGain) return;
+    const now = a.currentTime;
+    const thud = a.createOscillator();
+    const tg = a.createGain();
+    thud.type = "sine";
+    thud.frequency.setValueAtTime(120, now);
+    thud.frequency.exponentialRampToValueAtTime(48, now + 0.1);
+    tg.gain.setValueAtTime(0, now);
+    tg.gain.linearRampToValueAtTime(0.12 * layerVolume.march, now + 8e-3);
+    tg.gain.exponentialRampToValueAtTime(8e-4, now + 0.13);
+    thud.connect(tg).connect(marchGain);
+    thud.start(now);
+    thud.stop(now + 0.15);
+    const source = a.createBufferSource();
+    source.buffer = noise(a);
+    const filter = a.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.frequency.value = 1500;
+    const ng = a.createGain();
+    ng.gain.setValueAtTime(0, now);
+    ng.gain.linearRampToValueAtTime(0.05 * layerVolume.march, now + 0.01);
+    ng.gain.exponentialRampToValueAtTime(8e-4, now + 0.12);
+    source.connect(filter).connect(ng).connect(marchGain);
+    source.start(now);
+    source.stop(now + 0.14);
+    marchGain.gain.linearRampToValueAtTime(0.85 * layerVolume.march, now + 0.3);
+    marchTimer = window.setTimeout(step, 340);
+  };
+  marchTimer = window.setTimeout(step, 60);
+}
+function stopMarch() {
+  if (marchTimer !== null) {
+    clearTimeout(marchTimer);
+    marchTimer = null;
+  }
+  if (marchGain && ac) {
+    const g = marchGain;
+    g.gain.cancelScheduledValues(ac.currentTime);
+    g.gain.linearRampToValueAtTime(0, ac.currentTime + 0.4);
+    window.setTimeout(() => {
+      try {
+        g.disconnect();
+      } catch {
+      }
+    }, 600);
+  }
+  marchGain = null;
+  marchOn = false;
+}
+function playCaptureSound() {
+  const a = audio();
+  if (!a || !master) return;
+  const now = a.currentTime;
+  const notes = [392, 523, 659, 784];
+  notes.forEach((freq, i) => {
+    const osc = a.createOscillator();
+    const g = a.createGain();
+    const t = now + i * 0.085;
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.16, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(8e-4, t + 0.5);
+    osc.connect(g).connect(master);
+    osc.start(t);
+    osc.stop(t + 0.55);
+  });
+  const boom = a.createOscillator();
+  const bg = a.createGain();
+  boom.type = "sine";
+  boom.frequency.setValueAtTime(160, now);
+  boom.frequency.exponentialRampToValueAtTime(42, now + 0.32);
+  bg.gain.setValueAtTime(0.18, now);
+  bg.gain.exponentialRampToValueAtTime(8e-4, now + 0.42);
+  boom.connect(bg).connect(master);
+  boom.start(now);
+  boom.stop(now + 0.45);
+}
+function stopAllNature() {
+  stopAmbient();
+  stopMarch();
+}
+
+// src/game/sound.ts
+var SFX_KEYS = [
+  "ambient",
+  "march",
+  "capture",
+  "select",
+  "deselect",
+  "send",
+  "lose",
+  "repel",
+  "upgrade",
+  "shot",
+  "clash",
+  "win",
+  "defeat",
+  "start",
+  "hover"
+];
+var volumes = {};
+function setSfxVolumes(next) {
+  for (const key of SFX_KEYS) {
+    const raw = next?.[key];
+    volumes[key] = Number.isFinite(Number(raw)) ? Math.max(0, Math.min(1, Number(raw))) : 1;
+  }
+  setNatureVolume("ambient", volumes.ambient ?? 1);
+  setNatureVolume("march", volumes.march ?? 1);
+}
+var vol = (key) => key ? volumes[key] ?? 1 : 1;
+var ac2 = null;
+var enabled = true;
+var setSound = (v) => {
+  enabled = v;
+  if (!v) stopAllNature();
+};
+function ctx() {
+  try {
+    if (!ac2) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      ac2 = new AC();
+    }
+    if (ac2.state === "suspended") void ac2.resume();
+    return ac2;
+  } catch {
+    return null;
+  }
+}
+function beep(f, d = 0.1, t = "square", v = 0.04, key) {
+  if (!enabled) return;
+  v *= vol(key);
+  if (v <= 2e-4) return;
+  const a = ctx();
+  if (!a) return;
+  try {
+    const o = a.createOscillator();
+    const g = a.createGain();
+    o.type = t;
+    o.frequency.value = f;
+    g.gain.value = v;
+    g.gain.exponentialRampToValueAtTime(8e-4, a.currentTime + d);
+    o.connect(g);
+    g.connect(a.destination);
+    o.start();
+    o.stop(a.currentTime + d);
+  } catch {
+  }
+}
+function sweep(f0, f1, d = 0.18, t = "triangle", v = 0.05, key) {
+  if (!enabled) return;
+  v *= vol(key);
+  if (v <= 2e-4) return;
+  const a = ctx();
+  if (!a) return;
+  try {
+    const o = a.createOscillator();
+    const g = a.createGain();
+    o.type = t;
+    o.frequency.setValueAtTime(f0, a.currentTime);
+    o.frequency.exponentialRampToValueAtTime(Math.max(40, f1), a.currentTime + d);
+    g.gain.value = v;
+    g.gain.exponentialRampToValueAtTime(8e-4, a.currentTime + d);
+    o.connect(g);
+    g.connect(a.destination);
+    o.start();
+    o.stop(a.currentTime + d);
+  } catch {
+  }
+}
+var jingle = (a, key) => a.forEach((f, i) => setTimeout(() => beep(f, 0.2, "triangle", 0.06, key), i * 125));
+function brass(ctxA, freq, at, dur, vol2, cut = 2600, dest, vibrato = 6e-3) {
+  const now = ctxA.currentTime;
+  const filter = ctxA.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.setValueAtTime(500, now + at);
+  filter.frequency.exponentialRampToValueAtTime(cut, now + at + 0.05);
+  filter.frequency.exponentialRampToValueAtTime(cut * 0.72, now + at + dur);
+  filter.Q.value = 1.4;
+  const g = ctxA.createGain();
+  g.gain.setValueAtTime(1e-4, now + at);
+  g.gain.exponentialRampToValueAtTime(vol2, now + at + 0.02);
+  g.gain.setValueAtTime(vol2, now + at + dur * 0.78);
+  g.gain.exponentialRampToValueAtTime(6e-4, now + at + dur);
+  filter.connect(g);
+  g.connect(dest ?? ctxA.destination);
+  for (const detune of [-6, 6]) {
+    const o = ctxA.createOscillator();
+    o.type = "sawtooth";
+    o.frequency.value = freq;
+    o.detune.value = detune;
+    const lfo = ctxA.createOscillator();
+    const lfoGain = ctxA.createGain();
+    lfo.frequency.value = 5.4;
+    lfoGain.gain.value = freq * vibrato;
+    lfo.connect(lfoGain);
+    lfoGain.connect(o.frequency);
+    o.connect(filter);
+    o.start(now + at);
+    o.stop(now + at + dur + 0.06);
+    lfo.start(now + at);
+    lfo.stop(now + at + dur + 0.06);
+  }
+}
+function noiseHit(ctxA, at, dur, freq, vol2, q = 1.2, dest) {
+  const length = Math.max(1, Math.floor(ctxA.sampleRate * dur));
+  const buffer = ctxA.createBuffer(1, length, ctxA.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / length);
+  const src = ctxA.createBufferSource();
+  src.buffer = buffer;
+  const filter = ctxA.createBiquadFilter();
+  filter.type = "bandpass";
+  filter.frequency.value = freq;
+  filter.Q.value = q;
+  const g = ctxA.createGain();
+  g.gain.value = vol2;
+  src.connect(filter);
+  filter.connect(g);
+  g.connect(dest ?? ctxA.destination);
+  src.start(ctxA.currentTime + at);
+}
+function bell(ctxA, freq, at, dur, vol2, dest) {
+  const now = ctxA.currentTime;
+  for (const [mult, amp, decay] of [[1, 1, 1], [2.01, 0.42, 0.62], [3.02, 0.2, 0.4], [4.17, 0.1, 0.28]]) {
+    const o = ctxA.createOscillator();
+    const g = ctxA.createGain();
+    o.type = "sine";
+    o.frequency.value = freq * mult;
+    g.gain.setValueAtTime(1e-4, now + at);
+    g.gain.exponentialRampToValueAtTime(vol2 * amp, now + at + 6e-3);
+    g.gain.exponentialRampToValueAtTime(4e-4, now + at + dur * decay);
+    o.connect(g);
+    g.connect(dest ?? ctxA.destination);
+    o.start(now + at);
+    o.stop(now + at + dur * decay + 0.05);
+  }
+}
+function captureFanfare() {
+  if (!enabled) return;
+  const a = ctx();
+  if (!a) return;
+  try {
+    const level = vol("capture");
+    if (level <= 1e-3) return;
+    const bus = a.createGain();
+    bus.gain.value = 0.72 * level;
+    const shaper = a.createWaveShaper();
+    const curve = new Float32Array(1024);
+    for (let i = 0; i < curve.length; i++) {
+      const x = i / (curve.length - 1) * 2 - 1;
+      curve[i] = Math.tanh(x * 1.6) / Math.tanh(1.6);
+    }
+    shaper.curve = curve;
+    shaper.oversample = "2x";
+    bus.connect(shaper);
+    shaper.connect(a.destination);
+    const now = a.currentTime;
+    const drum = a.createOscillator();
+    const drumGain = a.createGain();
+    drum.type = "sine";
+    drum.frequency.setValueAtTime(168, now);
+    drum.frequency.exponentialRampToValueAtTime(46, now + 0.28);
+    drumGain.gain.setValueAtTime(0.34, now);
+    drumGain.gain.exponentialRampToValueAtTime(1e-3, now + 0.42);
+    drum.connect(drumGain);
+    drumGain.connect(bus);
+    drum.start();
+    drum.stop(now + 0.45);
+    noiseHit(a, 0, 0.2, 220, 0.13, 0.8, bus);
+    noiseHit(a, 0.01, 0.9, 5600, 0.045, 0.9, bus);
+    for (const [f, v] of [[130.81, 0.062], [196, 0.058], [261.63, 0.055], [329.63, 0.045], [392, 0.03]]) {
+      brass(a, f, 0, 0.5, v, 2300, bus);
+    }
+    for (const [f, at] of [[392, 0.18], [523.25, 0.33], [659.25, 0.48]]) {
+      brass(a, f, at, 0.24, 0.09, 3300, bus, 4e-3);
+      brass(a, f / 2, at, 0.24, 0.03, 1650, bus, 4e-3);
+    }
+    brass(a, 783.99, 0.64, 0.62, 0.1, 4e3, bus, 9e-3);
+    brass(a, 391.99, 0.64, 0.62, 0.045, 2200, bus, 9e-3);
+    for (const [f, v] of [[130.81, 0.05], [196, 0.045], [261.63, 0.042], [329.63, 0.036], [523.25, 0.03], [659.25, 0.024]]) {
+      brass(a, f, 0.64, 0.62, v, 2400, bus);
+    }
+    bell(a, 1046.5, 0.64, 1.15, 0.05, bus);
+    bell(a, 1567.98, 0.66, 0.95, 0.028, bus);
+    noiseHit(a, 0.64, 0.85, 7600, 0.022, 1, bus);
+  } catch {
+  }
+}
+var ambientEnabled = false;
+var marchEnabled = false;
+function setNatureLayers(ambient, march) {
+  ambientEnabled = ambient;
+  marchEnabled = march;
+  setNatureSound("ambient", ambient);
+  setNatureSound("march", march);
+}
+var sfx = {
+  select: () => beep(560, 0.05, "triangle", 0.045, "select"),
+  deselect: () => beep(330, 0.05, "sine", 0.04, "deselect"),
+  send: () => sweep(420, 720, 0.16, "triangle", 0.05, "send"),
+  capture: () => captureFanfare(),
+  lose: () => beep(170, 0.32, "sawtooth", 0.05, "lose"),
+  repel: () => beep(220, 0.1, "sawtooth", 0.04, "repel"),
+  upgrade: () => beep(680, 0.16, "triangle", 0.05, "upgrade"),
+  shot: () => beep(920, 0.045, "square", 0.018, "shot"),
+  clash: () => beep(300, 0.06, "sawtooth", 0.028, "clash"),
+  win: () => jingle([523, 659, 784, 1047], "win"),
+  defeat: () => jingle([392, 330, 262, 196], "defeat"),
+  start: () => jingle([392, 523], "start"),
+  hover: () => beep(760, 0.03, "sine", 0.02, "hover")
+};
+
+// src/game/troops.ts
+var EPSILON = 1e-8;
+var producedUnit = (building) => building === "speed" ? "fast" : building === "heavy" ? "heavy" : "normal";
+var emptyArmy = () => ({ normal: 0, fast: 0, heavy: 0 });
+var unitCount = (points, type) => Math.max(0, Math.ceil((points - EPSILON) / UNITS[type].power));
+var armyCount = (army) => TROOP_TYPES.reduce((sum, type) => sum + unitCount(army[type], type), 0);
+var armyPower = (army) => TROOP_TYPES.reduce((sum, type) => sum + Math.max(0, army[type]), 0);
+function createArmy(type, count) {
+  const army = emptyArmy();
+  army[type] = Math.max(0, Math.floor(count)) * UNITS[type].power;
+  return army;
+}
+function addUnit(army, type, count = 1) {
+  army[type] += count * UNITS[type].power;
+}
+function selectArmy(army, requested) {
+  const selected = emptyArmy();
+  const total = armyCount(army);
+  const amount = Math.max(0, Math.min(total, Math.floor(requested)));
+  if (!total || !amount) return selected;
+  const shares = TROOP_TYPES.map((type, index) => {
+    const count = unitCount(army[type], type);
+    const ideal = count * amount / total;
+    return { type, count, take: Math.floor(ideal), remainder: ideal - Math.floor(ideal), index };
+  });
+  let rest = amount - shares.reduce((sum, share) => sum + share.take, 0);
+  for (const share of [...shares].sort((a, b) => b.remainder - a.remainder || a.index - b.index)) {
+    if (rest && share.take < share.count) {
+      share.take++;
+      rest--;
+    }
+  }
+  for (const share of shares) selected[share.type] = Math.min(army[share.type], share.take * UNITS[share.type].power);
+  return selected;
+}
+function takeArmy(army, amount) {
+  const selected = selectArmy(army, amount);
+  for (const type of TROOP_TYPES) army[type] = Math.max(0, army[type] - selected[type]);
+  return selected;
+}
+function damageArmy(army, damage) {
+  for (const type of TROOP_TYPES) {
+    const hit = Math.min(army[type], Math.max(0, damage));
+    army[type] -= hit;
+    if (army[type] < EPSILON) army[type] = 0;
+    damage -= hit;
+    if (damage <= EPSILON) break;
+  }
+}
+
+// src/game/scene-geometry.ts
+function noise2(seed) {
+  const n = Math.sin(seed * 127.1 + 31.7) * 43758.5453;
+  return n - Math.floor(n);
+}
+function tint(hex, amount) {
+  const value = parseInt(hex.replace("#", ""), 16);
+  const r = Math.max(0, Math.min(255, (value >> 16) + amount));
+  const g = Math.max(0, Math.min(255, (value >> 8 & 255) + amount));
+  const b = Math.max(0, Math.min(255, (value & 255) + amount));
+  return `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
+}
+function polygon(c, points, fill, stroke) {
+  if (points.length < 3) return;
+  c.beginPath();
+  c.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) c.lineTo(points[i].x, points[i].y);
+  c.closePath();
+  c.fillStyle = fill;
+  c.fill();
+  if (stroke) {
+    c.strokeStyle = stroke;
+    c.stroke();
+  }
+}
+function ring(x, y, rx, ry, sides = 8, phase = Math.PI / 8) {
+  return Array.from({ length: sides }, (_, i) => {
+    const angle = phase + i / sides * Math.PI * 2;
+    return { x: x + Math.cos(angle) * rx, y: y + Math.sin(angle) * ry };
+  });
+}
+function prism(c, base, height, color, roof = tint(color, 24)) {
+  const top = base.map((p) => ({ x: p.x, y: p.y - height }));
+  for (let i = 0; i < base.length; i++) {
+    const j = (i + 1) % base.length;
+    const dx = base[j].x - base[i].x;
+    if (dx >= 0) continue;
+    const dy = base[j].y - base[i].y;
+    const light = -10 - 24 * dy / Math.max(1, Math.hypot(dx, dy));
+    polygon(c, [top[i], top[j], base[j], base[i]], tint(color, light));
+    c.strokeStyle = "rgba(9,24,28,.09)";
+    c.lineWidth = 0.6;
+    c.beginPath();
+    c.moveTo(top[j].x, top[j].y);
+    c.lineTo(base[j].x, base[j].y);
+    c.stroke();
+  }
+  polygon(c, top, roof);
+  return top;
+}
+function block(c, x, y, w, d, h, color) {
+  return prism(c, [
+    { x: x + w / 2, y: y - d / 2 },
+    { x: x + w / 2, y: y + d / 2 },
+    { x: x - w / 2, y: y + d / 2 },
+    { x: x - w / 2, y: y - d / 2 }
+  ], h, color);
+}
+function shadow(c, x, y, rx, ry, alpha = 0.23) {
+  c.fillStyle = `rgba(5,24,29,${alpha})`;
+  c.beginPath();
+  c.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+  c.fill();
+}
+function crystal(c, x, y, width, height, color) {
+  const apex = { x: x - width * 0.08, y: y - height };
+  const left = { x: x - width * 0.53, y: y - height * 0.35 };
+  const right = { x: x + width * 0.53, y: y - height * 0.35 };
+  const middle = { x: x + width * 0.07, y: y - height * 0.22 };
+  const foot = { x, y };
+  polygon(c, [apex, left, middle], tint(color, 30));
+  polygon(c, [apex, middle, right], tint(color, -20));
+  polygon(c, [left, foot, middle], tint(color, -8));
+  polygon(c, [middle, foot, right], tint(color, -49));
+  c.strokeStyle = "rgba(255,255,255,.45)";
+  c.lineWidth = 1;
+  c.beginPath();
+  c.moveTo(apex.x, apex.y);
+  c.lineTo(middle.x, middle.y);
+  c.stroke();
+}
+
+// src/game/bridge-geometry.ts
+var BRIDGE_HALF_WIDTH = 15;
+var BRIDGE_APPROACH = BRIDGE_HALF_WIDTH * 2;
+var TROOP_LANE_SPACING = 6;
+var TROOP_FOOT_RADIUS = 3;
+function distanceToSegment(point, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / (dx * dx + dy * dy || 1)));
+  return Math.hypot(point.x - a.x - t * dx, point.y - a.y - t * dy);
+}
+var EPSILON2 = 1e-7;
+var cross = (ax, ay, bx, by) => ax * by - ay * bx;
+function pointInPolygon(point, vertices) {
+  if (vertices.length < 3) return false;
+  let inside2 = false;
+  for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
+    const a = vertices[j], b = vertices[i];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const px = point.x - a.x, py = point.y - a.y;
+    if (dx * dx + dy * dy <= EPSILON2) {
+      if (px * px + py * py <= EPSILON2) return true;
+      continue;
+    }
+    if (Math.abs(cross(dx, dy, px, py)) <= EPSILON2 && px * dx + py * dy >= -EPSILON2 && px * dx + py * dy <= dx * dx + dy * dy + EPSILON2) return true;
+    if (a.y > point.y !== b.y > point.y && point.x < a.x + dx * (point.y - a.y) / dy) inside2 = !inside2;
+  }
+  return inside2;
+}
+function bridgeWaterSpans(a, b, shores) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const lengthSquared = dx * dx + dy * dy;
+  if (lengthSquared <= EPSILON2) return [];
+  const cuts = [0, 1];
+  const add = (t) => {
+    if (t >= -EPSILON2 && t <= 1 + EPSILON2) cuts.push(Math.max(0, Math.min(1, t)));
+  };
+  for (const vertices of shores) {
+    for (let i = 0; i < vertices.length; i++) {
+      const p = vertices[i], q = vertices[(i + 1) % vertices.length];
+      const ex = q.x - p.x, ey = q.y - p.y;
+      const px = p.x - a.x, py = p.y - a.y;
+      const denominator = cross(dx, dy, ex, ey);
+      if (Math.abs(denominator) <= EPSILON2) {
+        if (Math.abs(cross(px, py, dx, dy)) <= EPSILON2) {
+          add((px * dx + py * dy) / lengthSquared);
+          add(((q.x - a.x) * dx + (q.y - a.y) * dy) / lengthSquared);
+        }
+        continue;
+      }
+      const t = cross(px, py, ex, ey) / denominator;
+      const u = cross(px, py, dx, dy) / denominator;
+      if (u >= -EPSILON2 && u <= 1 + EPSILON2) add(t);
+    }
+  }
+  cuts.sort((x, y) => x - y);
+  const unique = cuts.filter((t, i) => !i || t - cuts[i - 1] > EPSILON2);
+  const at = (t) => ({ x: a.x + dx * t, y: a.y + dy * t });
+  const intervals = [];
+  for (let i = 1; i < unique.length; i++) {
+    const from = unique[i - 1], to = unique[i];
+    if (shores.some((vertices) => pointInPolygon(at((from + to) / 2), vertices))) continue;
+    const last = intervals[intervals.length - 1];
+    if (last && Math.abs(last.to - from) <= EPSILON2) last.to = to;
+    else intervals.push({ from, to });
+  }
+  return intervals.map(({ from, to }) => ({ a: at(from), b: at(to) }));
+}
+
+// src/game/map.ts
+var DEFAULT_RANDOM_MAP = {
+  players: 3,
+  normal: 5,
+  fast: 2,
+  heavy: 2,
+  towers: 2,
+  lakes: 2,
+  ships: 2,
+  boats: 3,
+  largeMap: true,
+  minDistance: 30,
+  randomRoads: false
+};
+var PX_PER_METER = 6;
+var MAX_LAKES = 16;
+var MAX_SHIPS = 12;
+var MAX_BOATS = 16;
+function normalizeRandomMap(input) {
+  const source = { ...DEFAULT_RANDOM_MAP, ...input };
+  const whole = (value, low, high) => Number.isFinite(Number(value)) ? Math.max(low, Math.min(high, Math.floor(Number(value)))) : low;
+  return {
+    players: whole(source.players, 2, 4),
+    normal: whole(source.normal, 0, 50),
+    fast: whole(source.fast, 0, 50),
+    heavy: whole(source.heavy, 0, 50),
+    towers: whole(source.towers, 0, 50),
+    lakes: whole(source.lakes, 0, MAX_LAKES),
+    ships: whole(source.ships, 0, MAX_SHIPS),
+    boats: whole(source.boats, 0, MAX_BOATS),
+    largeMap: source.largeMap !== false,
+    minDistance: whole(source.minDistance, 0, 120),
+    randomRoads: source.randomRoads === true
+  };
+}
+function validateRandomMap(input) {
+  const totalCastles = input.normal + input.fast + input.heavy;
+  const total = totalCastles + input.towers;
+  if (input.players < 2 || input.players > 4) return "تعداد بازیکنان باید بین ۲ تا ۴ باشد.";
+  if ([input.normal, input.fast, input.heavy, input.towers].some((n) => !Number.isInteger(n) || n < 0 || n > 50)) {
+    return "تعداد ساختمان‌های هر نوع باید بین صفر تا ۵۰ باشد.";
+  }
+  if (totalCastles < input.players) return "برای هر بازیکن دست‌کم یک قلعه لازم است؛ برج پایگاه شروع نیست.";
+  if (total > 50) return "نقشه برای حفظ فاصلهٔ قلعه‌ها حداکثر ۵۰ ساختمان می‌تواند داشته باشد.";
+  if (input.lakes != null && (!Number.isInteger(input.lakes) || input.lakes < 0 || input.lakes > MAX_LAKES)) {
+    return `تعداد خلیج باید بین صفر تا ${MAX_LAKES} باشد.`;
+  }
+  if (input.ships != null && (!Number.isInteger(input.ships) || input.ships < 0 || input.ships > MAX_SHIPS)) {
+    return `تعداد کشتی باید بین صفر تا ${MAX_SHIPS} باشد.`;
+  }
+  if (input.boats != null && (!Number.isInteger(input.boats) || input.boats < 0 || input.boats > MAX_BOATS)) {
+    return `تعداد قایق باید بین صفر تا ${MAX_BOATS} باشد.`;
+  }
+  return null;
+}
+function shuffled(items) {
+  for (let i = items.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [items[i], items[j]] = [items[j], items[i]];
+  }
+  return items;
+}
+function furthestStarts(points, count) {
+  const chosen = [Math.floor(Math.random() * points.length)];
+  while (chosen.length < count) {
+    let best = -1;
+    let bestDistance = -1;
+    for (let i = 0; i < points.length; i++) {
+      if (chosen.includes(i)) continue;
+      const p = points[i];
+      const minDistance = Math.min(...chosen.map((index) => Math.hypot(p.x - points[index].x, p.y - points[index].y)));
+      if (minDistance > bestDistance) {
+        best = i;
+        bestDistance = minDistance;
+      }
+    }
+    if (best >= 0) chosen.push(best);
+  }
+  return chosen;
+}
+var LAYOUTS = ["scatter", "rows", "ring", "clusters", "valley"];
+var LAYOUT_LABEL = {
+  scatter: "پراکنده",
+  rows: "ردیفی",
+  ring: "حلقه‌ای",
+  clusters: "خوشه‌ای",
+  valley: "دره"
+};
+function repairOverlap(cells, sep, w, h, margin) {
+  for (let pass = 0; pass < 60; pass++) {
+    let moved = false;
+    for (let i = 0; i < cells.length; i++) {
+      for (let j = i + 1; j < cells.length; j++) {
+        const a = cells[i], b = cells[j];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const d = Math.hypot(dx, dy) || 0.01;
+        if (d >= sep) continue;
+        const push = (sep - d) / 2;
+        const ux = dx / d, uy = dy / d;
+        a.x -= ux * push;
+        a.y -= uy * push;
+        b.x += ux * push;
+        b.y += uy * push;
+        moved = true;
+      }
+    }
+    for (const p of cells) {
+      p.x = Math.max(margin * 0.55, Math.min(w - margin * 0.55, p.x));
+      p.y = Math.max(margin * 0.55, Math.min(h - margin * 0.55, p.y));
+    }
+    if (!moved) break;
+  }
+}
+function scatterCells(count, w, h, margin, sep, centerClear) {
+  const cells = [];
+  let minSep = sep;
+  for (let attempt = 0; attempt < 6e3 && cells.length < count; attempt++) {
+    const p = { x: margin + Math.random() * (w - margin * 2), y: margin + Math.random() * (h - margin * 2) };
+    if (centerClear > 0 && Math.hypot(p.x - w / 2, p.y - h / 2) < centerClear) continue;
+    if (cells.every((q) => Math.hypot(q.x - p.x, q.y - p.y) >= minSep)) cells.push(p);
+    else if (attempt % 700 === 699) minSep = Math.max(88, minSep * 0.9);
+  }
+  while (cells.length < count) {
+    cells.push({ x: margin + Math.random() * (w - margin * 2), y: margin + Math.random() * (h - margin * 2) });
+  }
+  return cells;
+}
+function rowsCells(count, w, h, margin, large) {
+  const columns = Math.max(2, Math.ceil(Math.sqrt(count * w / h)));
+  const rows = Math.max(2, Math.ceil(count / columns));
+  const left = margin, right = w - margin, top = margin, bottom = h - margin;
+  const rowCounts = Array.from({ length: rows }, (_, row) => Math.floor(count / rows) + (row < count % rows ? 1 : 0));
+  const jitter = large ? 52 : 16;
+  const curveAmp = large ? 24 + Math.random() * 46 : 7 + Math.random() * 12;
+  const curveFreq = 0.55 + Math.random() * 1.15;
+  const curvePhase = Math.random() * Math.PI * 2;
+  const cells = [];
+  for (let row = 0; row < rows; row++) {
+    const n = rowCounts[row];
+    const squeeze = 0.72 + Math.random() * 0.28;
+    const width = (right - left) * (row === 0 || row === rows - 1 ? 0.82 + Math.random() * 0.16 : squeeze);
+    const indent = (right - left - width) * (0.2 + Math.random() * 0.6);
+    const step = width / Math.max(1, n - 1);
+    for (let col = 0; col < n; col++) {
+      cells.push({
+        x: n === 1 ? w / 2 + (Math.random() - 0.5) * jitter * 2 : left + indent + col * step + (Math.random() - 0.5) * jitter,
+        y: top + row * (bottom - top) / Math.max(1, rows - 1) + Math.sin(col * curveFreq + row * 1.3 + curvePhase) * curveAmp + (Math.random() - 0.5) * jitter
+      });
+    }
+  }
+  return cells;
+}
+function ringCells(count, w, h, margin) {
+  const cx = w / 2, cy = h / 2;
+  const maxRx = w / 2 - margin, maxRy = h / 2 - margin;
+  const rings = Math.max(1, Math.min(4, Math.ceil(count / 9)));
+  const cells = [];
+  let placed = 0;
+  for (let r = 0; r < rings; r++) {
+    const n = Math.ceil((count - placed) / (rings - r));
+    const radius = 0.38 + 0.58 * (rings === 1 ? 0.9 : r / Math.max(1, rings - 1));
+    for (let k = 0; k < n && placed < count; k++) {
+      const angle = k / n * Math.PI * 2 + r * 1.1 + (Math.random() - 0.5) * 0.55;
+      const wobble = 0.82 + Math.random() * 0.34;
+      cells.push({
+        x: cx + Math.cos(angle) * maxRx * radius * wobble,
+        y: cy + Math.sin(angle) * maxRy * radius * wobble
+      });
+      placed++;
+    }
+  }
+  return cells;
+}
+function clusterCells(count, w, h, margin, sep, centerClear) {
+  const nClusters = Math.max(2, Math.min(5, Math.round(count / 4) + 1));
+  const centers = [];
+  while (centers.length < nClusters) {
+    const p = { x: margin + Math.random() * (w - margin * 2), y: margin + Math.random() * (h - margin * 2) };
+    if (centerClear > 0 && Math.hypot(p.x - w / 2, p.y - h / 2) < centerClear * 0.7) continue;
+    if (centers.every((q) => Math.hypot(q.x - p.x, q.y - p.y) > sep * 1.15)) centers.push(p);
+  }
+  const cells = [];
+  let minSep = sep;
+  for (let attempt = 0; attempt < 6e3 && cells.length < count; attempt++) {
+    const center = centers[attempt % centers.length];
+    const angle = Math.random() * Math.PI * 2;
+    const radius = Math.sqrt(Math.random()) * sep * 1.75;
+    const p = { x: center.x + Math.cos(angle) * radius, y: center.y + Math.sin(angle) * radius * 0.82 };
+    if (p.x < margin || p.x > w - margin || p.y < margin || p.y > h - margin) continue;
+    if (centerClear > 0 && Math.hypot(p.x - w / 2, p.y - h / 2) < centerClear) continue;
+    if (cells.every((q) => Math.hypot(q.x - p.x, q.y - p.y) >= minSep)) cells.push(p);
+    else if (attempt % 700 === 699) minSep = Math.max(88, minSep * 0.9);
+  }
+  while (cells.length < count) {
+    const center = centers[cells.length % centers.length];
+    cells.push({ x: center.x + (Math.random() - 0.5) * sep, y: center.y + (Math.random() - 0.5) * sep });
+  }
+  return cells;
+}
+function valleyCells(count, w, h, margin, sep) {
+  const vertical = Math.random() < 0.5;
+  const flip = Math.random() < 0.5 ? -1 : 1;
+  const amp = h * (0.1 + Math.random() * 0.16);
+  const freq = 1 + Math.random() * 1.6;
+  const phase = Math.random() * Math.PI * 2;
+  const cells = [];
+  for (let i = 0; i < count; i++) {
+    const t = (i + 0.5) / count + (Math.random() - 0.5) * 0.55 / count;
+    const along = margin + t * ((vertical ? h : w) - margin * 2);
+    const wave = Math.sin(t * Math.PI * freq + phase) * amp + (Math.random() - 0.5) * sep * 0.9;
+    const across = t * ((vertical ? w : h) - margin * 2) + margin + wave * flip;
+    const p = vertical ? { x: across, y: along } : { x: along, y: across };
+    p.x = Math.max(margin, Math.min(w - margin, p.x));
+    p.y = Math.max(margin, Math.min(h - margin, p.y));
+    cells.push(p);
+  }
+  return cells;
+}
+function centralizeTowers(cells, towerCount, w, h) {
+  if (towerCount <= 0) return [];
+  const ranked = cells.map((p, index) => ({
+    index,
+    distance: ((p.x - w / 2) / w) ** 2 + ((p.y - h / 2) / h) ** 2
+  })).sort((a, b) => a.distance - b.distance).slice(0, towerCount);
+  for (const { index } of ranked) {
+    const p = cells[index];
+    for (let guard = 0; guard < 4; guard++) {
+      const distance2 = Math.hypot((p.x - w / 2) / w, (p.y - h / 2) / h);
+      if (distance2 < 0.17) break;
+      p.x += (w / 2 - p.x) * 0.34;
+      p.y += (h / 2 - p.y) * 0.34;
+    }
+  }
+  return ranked.map((item) => item.index);
+}
+function createRandomLevel(raw) {
+  const config = normalizeRandomMap(raw);
+  const error = validateRandomMap(config);
+  if (error) throw new Error(error);
+  const castleTypes = [
+    ...Array.from({ length: config.normal }, () => "barracks"),
+    ...Array.from({ length: config.fast }, () => "speed"),
+    ...Array.from({ length: config.heavy }, () => "heavy")
+  ];
+  const towerTypes = Array.from({ length: config.towers }, () => "tower");
+  shuffled(castleTypes);
+  const total = castleTypes.length + towerTypes.length;
+  const margin = config.largeMap ? 110 : 82;
+  const spacing = Math.max(90, config.minDistance * PX_PER_METER);
+  const columns = Math.max(2, Math.ceil(Math.sqrt(total * CFG.W / CFG.H)));
+  const rows = Math.max(2, Math.ceil(total / columns));
+  const baseW = margin * 2 + Math.max(0, columns - 1) * spacing;
+  const baseH = margin * 2 + Math.max(0, rows - 1) * spacing;
+  const worldWidth = config.largeMap ? Math.round(Math.max(1350, baseW) * (1 + Math.random() * 0.22)) : CFG.W;
+  const worldHeight = config.largeMap ? Math.round(Math.max(860, baseH) * (1 + Math.random() * 0.2)) : CFG.H;
+  const pool = total > 16 ? ["scatter", "rows"] : [...LAYOUTS];
+  const layout = pool[Math.floor(Math.random() * pool.length)];
+  const centerClear = config.towers > 0 && layout !== "rows" && layout !== "ring" ? Math.min(worldWidth, worldHeight) * 0.16 : 0;
+  let cells;
+  if (layout === "rows") cells = rowsCells(total, worldWidth, worldHeight, margin, config.largeMap);
+  else if (layout === "ring") cells = ringCells(total, worldWidth, worldHeight, margin);
+  else if (layout === "clusters") cells = clusterCells(total, worldWidth, worldHeight, margin, spacing, centerClear);
+  else if (layout === "valley" && config.largeMap) cells = valleyCells(total, worldWidth, worldHeight, margin, spacing);
+  else cells = scatterCells(total, worldWidth, worldHeight, margin, spacing, centerClear);
+  const towerCells = centralizeTowers(cells, config.towers, worldWidth, worldHeight);
+  repairOverlap(cells, config.largeMap ? spacing : 96, worldWidth, worldHeight, margin);
+  const towerCellSet = new Set(towerCells);
+  const castleCells = cells.map((_, index) => index).filter((index) => !towerCellSet.has(index));
+  const starts = furthestStarts(castleCells.map((index) => cells[index]), config.players).map((index) => castleCells[index]);
+  const reserved = new Set(starts);
+  const available = shuffled(castleCells.filter((index) => !reserved.has(index)));
+  const startTypes = castleTypes.splice(0, config.players);
+  const buildings = [];
+  for (let player = 0; player < config.players; player++) {
+    const p = cells[starts[player]];
+    buildings.push([p.x, p.y, player + 1, startTypes[player], startTypes[player] === "heavy" ? 15 : 22]);
+  }
+  const neutralTypes = shuffled(castleTypes);
+  neutralTypes.forEach((type, index) => {
+    const p = cells[available[index]];
+    const troops = type === "tower" ? 7 + Math.floor(Math.random() * 4) : 4 + Math.floor(Math.random() * 6);
+    buildings.push([p.x, p.y, 0, type, troops]);
+  });
+  towerCells.forEach((cellIndex) => {
+    const p = cells[cellIndex];
+    buildings.push([p.x, p.y, 0, "tower", 7 + Math.floor(Math.random() * 4)]);
+  });
+  const summary = `${config.normal} عادی، ${config.fast} سریع، ${config.heavy} سنگین و ${config.towers} برج`;
+  return {
+    name: "نقشهٔ رندوم",
+    ai: 0.55 + Math.random() * 0.3,
+    hint: `${config.players} بازیکن · ${summary} · ${config.lakes} خلیج · ${config.ships} کشتی و ${config.boats} قایق · چیدمان ${LAYOUT_LABEL[layout]}. قلعه‌های شروع در اطراف نقشه پخش شده‌اند؛ برج‌ها و بقیهٔ قلعه‌ها خنثی هستند.`,
+    b: buildings,
+    worldWidth,
+    worldHeight,
+    largeMap: config.largeMap,
+    theme: Math.floor(Math.random() * THEME_COUNT),
+    lakes: config.lakes,
+    ships: config.ships,
+    boats: config.boats
+  };
+}
+
+// src/game/terrain.ts
+var THEMES = [
+  { water: ["#0b3440", "#16716c", "#1f8e80"], ground: ["#7da85c", "#89b566", "#709b52", "#9ab96a"], rock: "#40585b", rim: "#b8c888", tree: "#547e41" },
+  { water: ["#15363d", "#1d6866", "#369080"], ground: ["#a7a17b", "#b8b08a", "#999875", "#b2b182"], rock: "#5c625d", rim: "#d3c7a2", tree: "#668758" },
+  { water: ["#192f40", "#235c6a", "#388294"], ground: ["#8fa6a6", "#a6b9b5", "#7f9f9f", "#acc2ba"], rock: "#455a67", rim: "#c8d6cc", tree: "#42696b" },
+  { water: ["#14323c", "#20626b", "#2f8a8f"], ground: ["#b58a4c", "#c99f5f", "#a5763f", "#d4b071"], rock: "#6b5847", rim: "#e0c290", tree: "#b06a3c" },
+  { water: ["#241d3f", "#453a70", "#6a5a9e"], ground: ["#6f7fa8", "#8293bb", "#5d6c94", "#93a4c9"], rock: "#3f4566", rim: "#b6c2e2", tree: "#4d5c86" }
+];
+var cache = /* @__PURE__ */ new WeakMap();
+function clip(points, nx, ny, limit) {
+  const out = [];
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i], b = points[(i + 1) % points.length];
+    const da = a.x * nx + a.y * ny - limit, db = b.x * nx + b.y * ny - limit;
+    if (da <= 0) out.push(a);
+    if (da <= 0 !== db <= 0) {
+      const t = da / (da - db);
+      out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+    }
+  }
+  return out;
+}
+function distanceToPolygon(p, points) {
+  let best = Infinity;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const d = distanceToLine(p, points[j], points[i]);
+    if (d < best) best = d;
+  }
+  return best;
+}
+function carveBay(points, center, vertex, depth) {
+  const n = points.length;
+  if (n < 6) return points;
+  const a = points[(vertex - 1 + n) % n];
+  const b = points[(vertex + 1) % n];
+  const v = points[vertex];
+  const inward = { x: center.x - v.x, y: center.y - v.y };
+  const len = Math.hypot(inward.x, inward.y) || 1;
+  const ux = inward.x / len, uy = inward.y / len;
+  const steps = 9;
+  const bay = [];
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    const bulge = Math.sin(Math.PI * t) * depth;
+    bay.push({ x: a.x + (b.x - a.x) * t + ux * bulge, y: a.y + (b.y - a.y) * t + uy * bulge });
+  }
+  return [...points.slice(0, vertex), ...bay, ...points.slice(vertex + 1)];
+}
+function bayCandidate(points, center, i, depth) {
+  const v = points[i];
+  const a = points[(i - 1 + points.length) % points.length];
+  const b = points[(i + 1) % points.length];
+  if (Math.hypot(v.x - center.x, v.y - center.y) < 78) return false;
+  const chordMid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  const inward = { x: center.x - chordMid.x, y: center.y - chordMid.y };
+  const len = Math.hypot(inward.x, inward.y) || 1;
+  const tip = { x: chordMid.x + inward.x / len * depth, y: chordMid.y + inward.y / len * depth };
+  if (Math.hypot(tip.x - center.x, tip.y - center.y) < 66) return false;
+  return true;
+}
+function placeVessels(g, ships, boats, shores) {
+  const out = [];
+  const margin = 46;
+  const sails = ["#f3ead6", "#e8b44c", "#dfe9ef"];
+  const hulls = ["#6b4a2b", "#5c3f26", "#7a5533"];
+  const build = (kind, i) => {
+    const scale = kind === "ship" ? 0.98 + i % 3 * 0.12 : 0.74 + i % 3 * 0.08;
+    const clear = (kind === "ship" ? 34 : 20) * scale;
+    const cruise = out.length % 3 === 0;
+    const drift = cruise ? kind === "ship" ? 20 : 13 : 0;
+    const keep = clear + drift;
+    for (let guard = 0; guard < 260; guard++) {
+      const x = margin + Math.random() * (g.worldWidth - margin * 2);
+      const y = margin + Math.random() * (g.worldHeight - margin * 2);
+      const p = { x, y };
+      if (shores.some((points) => inside(p, points) || distanceToPolygon(p, points) < keep)) continue;
+      if (g.links.some(([ia, ib]) => distanceToLine(p, g.bs[ia], g.bs[ib]) < 40 + keep)) continue;
+      if (out.some((v) => Math.hypot(v.x - x, v.y - y) < 56 + keep)) continue;
+      out.push({
+        kind,
+        x,
+        y,
+        scale,
+        seed: out.length * 17 + (kind === "ship" ? 5 : 9),
+        hull: hulls[out.length % hulls.length],
+        sail: sails[out.length % sails.length],
+        cruise,
+        driftX: drift,
+        driftY: drift * 0.42,
+        spin: out.length % 2 === 0 ? 1 : -1,
+        phase: out.length * 1.7 + (kind === "ship" ? 0.6 : 0)
+      });
+      return;
+    }
+  };
+  for (let i = 0; i < ships; i++) build("ship", i);
+  for (let i = 0; i < boats; i++) build("boat", i);
+  return out;
+}
+function landscapeFor(g) {
+  const known = cache.get(g);
+  if (known?.buildings === g.bs && known.links === g.links) return known.landscape;
+  const themeIndex = g.demo ? 0 : Math.abs(g.L.theme ?? Math.floor(g.i / 10)) % THEMES.length;
+  const theme = THEMES[themeIndex];
+  const scenery = [];
+  const hills = [];
+  const vessels = [];
+  const lakeCount = Math.max(0, Math.min(MAX_LAKES, g.L.lakes ?? 0));
+  const bayIslands = /* @__PURE__ */ new Set();
+  if (lakeCount > 0 && g.bs.length > 1) {
+    const order = g.bs.map((b) => b.id);
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(noise2(g.i * 97 + i * 13 + 5) * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    order.slice(0, Math.min(lakeCount, order.length)).forEach((id) => bayIslands.add(id));
+  }
+  const islands = g.bs.map((b) => {
+    const nearest = Math.min(...g.bs.filter((q) => q !== b).map((q) => Math.hypot(q.x - b.x, (q.y - b.y) * 1.15)));
+    const rx = Math.max(70, Math.min(190, nearest * 0.56 + 28));
+    const ry = rx * 0.72;
+    let points = ring(b.x, b.y + 8, rx, ry, 10, 0.16 + noise2(b.id * 5 + g.i) * 0.25).map((p, i) => ({ x: b.x + (p.x - b.x) * (0.88 + noise2(i * 7 + b.id * 13) * 0.17), y: b.y + (p.y - b.y) * (0.88 + noise2(i * 9 + b.id * 3) * 0.17) }));
+    for (const other of g.bs) {
+      if (other === b) continue;
+      const nx = other.x - b.x, ny = (other.y - b.y) * 1.4;
+      points = clip(points, nx, ny, nx * (b.x + other.x) / 2 + ny * (b.y + other.y) / 2);
+    }
+    points = points.map((p) => ({ x: b.x + (p.x - b.x) * 0.9, y: b.y + (p.y - b.y) * 0.9 }));
+    if (bayIslands.has(b.id)) {
+      const center = { x: b.x, y: b.y + 4 };
+      let bestVertex = -1;
+      let bestScore = -Infinity;
+      for (let i = 0; i < points.length; i++) {
+        const v = points[i];
+        const clearance = Math.hypot(v.x - center.x, v.y - center.y);
+        if (clearance < 88) continue;
+        if (g.links.some(([ia, ib]) => distanceToLine(v, g.bs[ia], g.bs[ib]) < 62)) continue;
+        if (!bayCandidate(points, center, i, 34)) continue;
+        const openness = Math.min(...g.bs.filter((q) => q !== b).map((q) => Math.hypot(q.x - v.x, (q.y - v.y) * 1.2)));
+        const score = Math.min(clearance, 190) * 0.35 + Math.min(openness, 220) * 0.65;
+        if (score > bestScore) {
+          bestScore = score;
+          bestVertex = i;
+        }
+      }
+      if (bestVertex >= 0) {
+        const v = points[bestVertex];
+        const reach = Math.hypot(v.x - center.x, v.y - center.y);
+        const clearance = Math.min(...g.links.flatMap(([ia, ib]) => {
+          const A = g.bs[ia], B = g.bs[ib];
+          const dx = B.x - A.x, dy = B.y - A.y;
+          const len2 = dx * dx + dy * dy || 1;
+          const t = Math.max(0, Math.min(1, ((v.x - A.x) * dx + (v.y - A.y) * dy) / len2));
+          return [Math.hypot(v.x - A.x - t * dx, v.y - A.y - t * dy)];
+        }).concat([999]));
+        const carve = Math.max(30, Math.min(76, Math.min(reach - 86, clearance - 20)));
+        const carved = carveBay(points, center, bestVertex, carve);
+        if (carved.length >= 6) {
+          points = carved;
+        }
+      }
+    }
+    const depth = 15 + noise2(b.id * 17 + 6) * 38 + (noise2(b.id * 29 + 3) > 0.7 ? 14 : 0);
+    for (let k = 0; k < 4; k++) {
+      const angle = k / 4 * Math.PI * 2 + noise2(b.id + k * 4) * 0.7;
+      const p = { x: b.x + Math.cos(angle) * rx * 0.67, y: b.y + Math.sin(angle) * ry * 0.67 };
+      if (Math.hypot(p.x - b.x, (p.y - b.y) * 1.6) < 65) continue;
+      if (Math.abs(p.x - b.x) < 48 && p.y > b.y - 20) continue;
+      if (!inside(p, points)) continue;
+      if (g.links.some(([a, z]) => distanceToLine(p, g.bs[a], g.bs[z]) < 24)) continue;
+      scenery.push({ ...p, scale: 0.65 + noise2(k * 19 + b.id) * 0.7, type: k === 3 ? "ruin" : k % 2 ? "rock" : "pine", seed: b.id * 13 + k, color: theme.tree });
+    }
+    const hillCount = rx > 120 ? noise2(b.id * 41 + 5) > 0.45 ? 2 : 1 : noise2(b.id * 41 + 5) > 0.6 ? 1 : 0;
+    for (let k = 0; k < hillCount; k++) {
+      const angle = noise2(b.id * 53 + k * 7) * Math.PI * 2;
+      const reach = 0.34 + noise2(b.id * 61 + k * 3) * 0.32;
+      const p = { x: b.x + Math.cos(angle) * rx * reach, y: b.y + 10 + Math.sin(angle) * ry * reach };
+      const r = 16 + noise2(b.id * 67 + k * 11) * 20;
+      const h = 8 + noise2(b.id * 71 + k * 13) * 13;
+      if (!inside(p, points)) continue;
+      if (Math.hypot(p.x - b.x, p.y - b.y) < 62) continue;
+      if (g.links.some(([a, z]) => distanceToLine(p, g.bs[a], g.bs[z]) < 42)) continue;
+      if (hills.some((hill) => Math.hypot(hill.x - p.x, hill.y - p.y) < hill.r + r + 12)) continue;
+      if ([[10, 0], [-10, 0], [0, 8], [0, -8]].some(([dx, dy]) => !inside({ x: p.x + dx, y: p.y + dy }, points))) continue;
+      hills.push({ island: b.id, ...p, r, h, seed: b.id * 17 + k * 5 });
+    }
+    const surface = b.type === "tower" ? { ...theme, ground: ["#8c9b8e", "#a1aca0", "#7e8e86", "#adb5a6"], rim: "#bac3ac" } : theme;
+    return { id: b.id, x: b.x, y: b.y, points, depth, theme: surface };
+  }).sort((a, b) => a.y - b.y);
+  const shores = islands.map((island) => island.points);
+  vessels.push(...placeVessels(g, Math.max(0, Math.min(MAX_SHIPS, g.L.ships ?? 0)), Math.max(0, Math.min(MAX_BOATS, g.L.boats ?? 0)), shores));
+  const bridges = g.links.flatMap(([a, b]) => bridgeWaterSpans(g.bs[a], g.bs[b], shores));
+  const roads = [];
+  for (const [ia, ib] of g.links) {
+    const A = g.bs[ia], B = g.bs[ib];
+    const dx = B.x - A.x, dy = B.y - A.y;
+    const lengthSquared = dx * dx + dy * dy;
+    if (lengthSquared <= 1) continue;
+    const water = bridgeWaterSpans(A, B, shores).map((span) => [
+      ((span.a.x - A.x) * dx + (span.a.y - A.y) * dy) / lengthSquared,
+      ((span.b.x - A.x) * dx + (span.b.y - A.y) * dy) / lengthSquared
+    ]).sort((x, y) => x[0] - y[0]);
+    let cursor = 0;
+    for (const [t0, t1] of [...water, [1, 1]]) {
+      if (t0 - cursor > 0.012) {
+        const p0 = { x: A.x + dx * cursor, y: A.y + dy * cursor };
+        const p1 = { x: A.x + dx * t0, y: A.y + dy * t0 };
+        const mid = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
+        const island = islands.find((item) => inside(mid, item.points));
+        if (island) roads.push({ island: island.id, a: p0, b: p1 });
+      }
+      cursor = Math.max(cursor, t1);
+    }
+  }
+  const landscape = { islands, scenery, hills, vessels, roads, bridges, theme };
+  cache.set(g, { buildings: g.bs, links: g.links, landscape });
+  return landscape;
+}
+function inside(p, points) {
+  let result = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const a = points[i], b = points[j];
+    if (a.y > p.y !== b.y > p.y && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) result = !result;
+  }
+  return result;
+}
+function distanceToLine(p, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy || 1)));
+  return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
+}
+function drawWater(c, g, width, height, time) {
+  const colors = g ? landscapeFor(g).theme.water : THEMES[0].water;
+  const gradient = c.createLinearGradient(0, 0, width, height);
+  gradient.addColorStop(0, colors[0]);
+  gradient.addColorStop(0.55, colors[1]);
+  gradient.addColorStop(1, colors[2]);
+  c.fillStyle = gradient;
+  c.fillRect(0, 0, width, height);
+  c.lineCap = "round";
+  for (let i = 0; i < 60; i++) {
+    const x = noise2(i * 5.71) * width, y = noise2(i * 8.91 + 2) * height;
+    const drift = Math.sin(time * 0.4 + i) * 8;
+    c.strokeStyle = `rgba(164,236,208,${0.035 + 0.035 * Math.sin(time * 0.7 + i)})`;
+    c.lineWidth = 1.4;
+    c.beginPath();
+    c.moveTo(x + drift, y);
+    c.quadraticCurveTo(x + 14 + drift, y + 3, x + 31 + drift, y);
+    c.stroke();
+  }
+}
+var BRIDGE_WALL = 16;
+function drawBridge(c, a, b, depthA, depthB) {
+  const spanLength = Math.hypot(b.x - a.x, b.y - a.y);
+  if (spanLength < 0.5) return;
+  const ux = (b.x - a.x) / spanLength, uy = (b.y - a.y) / spanLength;
+  const approach = BRIDGE_APPROACH;
+  a = { x: a.x - ux * approach, y: a.y - uy * approach };
+  b = { x: b.x + ux * approach, y: b.y + uy * approach };
+  const length = spanLength + approach * 2;
+  const vx = -uy * BRIDGE_HALF_WIDTH, vy = ux * BRIDGE_HALF_WIDTH;
+  const wallA = Math.max(BRIDGE_WALL, Math.min(64, depthA * 0.9));
+  const wallB = Math.max(BRIDGE_WALL, Math.min(64, depthB * 0.9));
+  const top = [
+    { x: a.x + vx, y: a.y + vy },
+    { x: a.x - vx, y: a.y - vy },
+    { x: b.x - vx, y: b.y - vy },
+    { x: b.x + vx, y: b.y + vy }
+  ];
+  polygon(c, top.map((p, i) => ({ x: p.x + 3, y: p.y + (i < 2 ? wallA : wallB) + 6 })), "rgba(4,28,30,.28)");
+  polygon(c, [top[1], top[2], { x: top[2].x, y: top[2].y + wallB }, { x: top[1].x, y: top[1].y + wallA }], "#2f4a46");
+  polygon(c, [top[3], top[0], { x: top[0].x, y: top[0].y + wallA }, { x: top[3].x, y: top[3].y + wallB }], "#3a5751");
+  c.strokeStyle = "rgba(146,178,168,.35)";
+  c.lineWidth = 1;
+  for (let d = 20; d < length - 12; d += 26) {
+    const t = d / length;
+    const wall = wallA + (wallB - wallA) * t;
+    const x = a.x + ux * d, y = a.y + uy * d;
+    c.beginPath();
+    c.moveTo(x - vx, y - vy + wall * 0.25);
+    c.lineTo(x - vx, y - vy + wall * 0.85);
+    c.stroke();
+    c.beginPath();
+    c.moveTo(x + vx, y + vy + wall * 0.25);
+    c.lineTo(x + vx, y + vy + wall * 0.85);
+    c.stroke();
+  }
+  const deck = c.createLinearGradient(a.x, a.y, b.x, b.y);
+  const highFirst = wallA >= wallB;
+  deck.addColorStop(0, highFirst ? "#e7ebd2" : "#c2c8aa");
+  deck.addColorStop(1, highFirst ? "#c2c8aa" : "#e7ebd2");
+  polygon(c, top, deck);
+  c.strokeStyle = "#aab297";
+  c.lineWidth = 1.1;
+  for (let d = 13; d < length; d += 15) {
+    const x = a.x + ux * d, y = a.y + uy * d;
+    c.beginPath();
+    c.moveTo(x + vx, y + vy);
+    c.lineTo(x - vx, y - vy);
+    c.stroke();
+  }
+  c.strokeStyle = "rgba(255,255,255,.22)";
+  c.lineWidth = 2;
+  c.beginPath();
+  c.moveTo(a.x, a.y);
+  c.lineTo(b.x, b.y);
+  c.stroke();
+  c.lineWidth = 2.5;
+  for (const side of [-1, 1]) {
+    c.strokeStyle = side < 0 ? "#e8ead0" : "#7f8b76";
+    c.beginPath();
+    c.moveTo(a.x + vx * side, a.y + vy * side);
+    c.lineTo(b.x + vx * side, b.y + vy * side);
+    c.stroke();
+  }
+}
+function shoreDepth(islands, point) {
+  let best = 30;
+  let bestDistance = Infinity;
+  for (const island of islands) {
+    const distance2 = Math.hypot(island.x - point.x, island.y - point.y);
+    if (distance2 < bestDistance) {
+      bestDistance = distance2;
+      best = island.depth;
+    }
+  }
+  return best;
+}
+function drawHill(c, hill, theme) {
+  shadow(c, hill.x + 5, hill.y + 7, hill.r * 0.95, hill.r * 0.48, 0.15);
+  prism(c, ring(hill.x, hill.y, hill.r, hill.r * 0.5, 8), hill.h, theme.ground[2]);
+  prism(c, ring(hill.x - hill.r * 0.12, hill.y - hill.h + 1, hill.r * 0.55, hill.r * 0.3, 7), hill.h * 0.5, theme.ground[1]);
+}
+function vesselPose(v, time) {
+  const angle = time * 0.13 * v.spin + v.phase;
+  const driftX = v.cruise ? Math.cos(angle) * v.driftX : 0;
+  const driftY = v.cruise ? Math.sin(angle) * v.driftY : 0;
+  const bob = Math.sin(time * 1.3 + v.seed) * 1.6;
+  const tilt = Math.sin(time * 0.9 + v.seed * 1.7) * 0.02 - (v.cruise ? Math.sin(angle) * 0.045 : 0);
+  return { x: v.x + driftX, y: v.y + driftY + bob, tilt, moving: v.cruise };
+}
+function drawVessel(c, v, time) {
+  const pose = vesselPose(v, time);
+  if (Math.abs(pose.tilt) > 1e-4) {
+    c.save();
+    c.translate(pose.x, pose.y);
+    c.rotate(pose.tilt * 0.45);
+    c.translate(-pose.x, -pose.y);
+    paintVessel(c, v, pose);
+    c.restore();
+  } else {
+    paintVessel(c, v, pose);
+  }
+}
+function paintVessel(c, v, pose) {
+  const tilt = pose.tilt;
+  const s = v.scale;
+  const x = pose.x;
+  const y = pose.y;
+  c.fillStyle = "rgba(6,40,46,.22)";
+  c.beginPath();
+  c.ellipse(x + 1, y + 4, 26 * s, 8 * s, 0, 0, Math.PI * 2);
+  c.fill();
+  c.strokeStyle = "rgba(164,236,208,.22)";
+  c.lineWidth = 1.2;
+  c.beginPath();
+  c.ellipse(x, y + 3, 22 * s, 7 * s, 0, 0, Math.PI * 2);
+  c.stroke();
+  if (pose.moving) {
+    c.strokeStyle = "rgba(198,248,232,.20)";
+    c.lineWidth = 1.4 * s;
+    c.beginPath();
+    c.moveTo(x - 15 * s, y + 6 * s);
+    c.quadraticCurveTo(x, y + 11 * s, x + 15 * s, y + 6 * s);
+    c.stroke();
+  }
+  const hull = v.hull;
+  const deck = tint(hull, 26);
+  const dark = tint(hull, -32);
+  if (v.kind === "boat") {
+    c.beginPath();
+    c.moveTo(x - 16 * s, y - 2 * s);
+    c.quadraticCurveTo(x, y + 8 * s, x + 16 * s, y - 2 * s);
+    c.lineTo(x + 11 * s, y - 6 * s);
+    c.lineTo(x - 11 * s, y - 6 * s);
+    c.closePath();
+    c.fillStyle = dark;
+    c.fill();
+    c.beginPath();
+    c.moveTo(x - 13 * s, y - 4.5 * s);
+    c.quadraticCurveTo(x, y + 4 * s, x + 13 * s, y - 4.5 * s);
+    c.closePath();
+    c.fillStyle = tint(hull, 62);
+    c.fill();
+    c.strokeStyle = tint(hull, 88);
+    c.lineWidth = 1.1 * s;
+    c.beginPath();
+    c.moveTo(x - 13 * s, y - 4.5 * s);
+    c.quadraticCurveTo(x, y + 4 * s, x + 13 * s, y - 4.5 * s);
+    c.stroke();
+    c.strokeStyle = dark;
+    c.lineWidth = 1.2 * s;
+    c.beginPath();
+    c.moveTo(x - 6 * s, y - 4.2 * s);
+    c.lineTo(x + 6 * s, y - 4.2 * s);
+    c.stroke();
+    for (const dir of [-1, 1]) {
+      c.strokeStyle = tint(deck, 60);
+      c.lineWidth = 1.4 * s;
+      c.beginPath();
+      c.moveTo(x + dir * 4 * s, y - 3 * s);
+      c.lineTo(x + dir * 17 * s, y + 4 * s);
+      c.stroke();
+      c.beginPath();
+      c.ellipse(x + dir * 18 * s, y + 4.6 * s, 3.2 * s, 1.7 * s, dir * 0.5, 0, Math.PI * 2);
+      c.fillStyle = tint(deck, 44);
+      c.fill();
+    }
+    const post = y - 22 * s;
+    c.strokeStyle = tint(hull, -52);
+    c.lineWidth = 1.3 * s;
+    c.beginPath();
+    c.moveTo(x, y - 5 * s);
+    c.lineTo(x, post);
+    c.stroke();
+    c.beginPath();
+    c.moveTo(x, post);
+    c.lineTo(x + 8 * s, post + 3 * s);
+    c.lineTo(x, post + 6 * s);
+    c.closePath();
+    c.fillStyle = v.sail;
+    c.fill();
+    return;
+  }
+  c.beginPath();
+  c.moveTo(x - 26 * s, y - 6 * s);
+  c.quadraticCurveTo(x, y + 10 * s, x + 26 * s, y - 6 * s);
+  c.lineTo(x + 19 * s, y - 11 * s);
+  c.lineTo(x - 19 * s, y - 11 * s);
+  c.closePath();
+  c.fillStyle = dark;
+  c.fill();
+  c.beginPath();
+  c.moveTo(x - 22 * s, y - 9 * s);
+  c.quadraticCurveTo(x, y + 5 * s, x + 22 * s, y - 9 * s);
+  c.closePath();
+  c.fillStyle = deck;
+  c.fill();
+  c.strokeStyle = tint(hull, 46);
+  c.lineWidth = 1.2 * s;
+  c.beginPath();
+  c.moveTo(x - 20 * s, y - 8.5 * s);
+  c.quadraticCurveTo(x, y + 3 * s, x + 20 * s, y - 8.5 * s);
+  c.stroke();
+  const mastTop = y - 42 * s;
+  c.strokeStyle = tint(hull, -52);
+  c.lineWidth = 1.6 * s;
+  c.beginPath();
+  c.moveTo(x, y - 9 * s);
+  c.lineTo(x, mastTop);
+  c.stroke();
+  c.save();
+  c.translate(x, y - 9 * s);
+  c.rotate(tilt);
+  const sail = v.sail;
+  c.beginPath();
+  c.moveTo(x * 0 + 1.2 * s, -34 * s);
+  c.quadraticCurveTo(17 * s, -22 * s, 12 * s, -2 * s);
+  c.lineTo(1.2 * s, -2 * s);
+  c.closePath();
+  c.fillStyle = sail;
+  c.fill();
+  c.strokeStyle = "rgba(0,0,0,.16)";
+  c.lineWidth = 0.9 * s;
+  c.stroke();
+  c.beginPath();
+  c.moveTo(-2.4 * s, -31 * s);
+  c.quadraticCurveTo(-15 * s, -20 * s, -11 * s, -3 * s);
+  c.lineTo(-2.4 * s, -3 * s);
+  c.closePath();
+  c.fillStyle = tint(sail, 26);
+  c.fill();
+  c.strokeStyle = "rgba(0,0,0,.16)";
+  c.stroke();
+  c.beginPath();
+  c.moveTo(0, -38 * s);
+  c.lineTo(7 * s, -35.5 * s);
+  c.lineTo(0, -33 * s);
+  c.closePath();
+  c.fillStyle = "#e8b44c";
+  c.fill();
+  c.restore();
+}
+function drawTerrain(c, g, time) {
+  const { islands, bridges, hills, vessels } = landscapeFor(g);
+  for (const vessel of vessels) drawVessel(c, vessel, time);
+  for (const island of islands) {
+    polygon(c, island.points.map((p) => ({ x: p.x + 10, y: p.y + island.depth + 5 })), "rgba(6,40,40,.22)");
+    c.strokeStyle = `rgba(121,228,202,${0.12 + Math.sin(time * 1.1 + island.id) * 0.04})`;
+    c.lineWidth = 9;
+    c.beginPath();
+    island.points.forEach((p, i) => i ? c.lineTo(p.x, p.y + island.depth + 3) : c.moveTo(p.x, p.y + island.depth + 3));
+    c.closePath();
+    c.stroke();
+  }
+  for (const island of islands) {
+    const bottom = island.points.map((p) => ({ x: p.x + 3, y: p.y + island.depth }));
+    const top = island.points;
+    for (let i = 0; i < top.length; i++) {
+      const j = (i + 1) % top.length;
+      if (top[j].x >= top[i].x) continue;
+      const face = [top[i], top[j], bottom[j], bottom[i]];
+      polygon(c, face, tint(island.theme.rock, -15 + noise2(i + island.id) * 25));
+      polygon(c, [top[j], bottom[j], bottom[i]], tint(island.theme.rock, -35 + noise2(i * 2) * 12));
+      const seam = { x: top[i].x + (top[j].x - top[i].x) * 0.56, y: top[i].y + (top[j].y - top[i].y) * 0.56 };
+      polygon(c, [seam, { x: seam.x - 6, y: seam.y + island.depth * 0.72 }, bottom[j]], "rgba(0,15,22,.14)");
+    }
+    polygon(c, top, island.theme.ground[0]);
+    const center = { x: island.x + 8, y: island.y + 12 };
+    for (let i = 0; i < top.length; i++) polygon(c, [center, top[i], top[(i + 1) % top.length]], island.theme.ground[(island.id + i) % island.theme.ground.length]);
+    if (top.length >= 3) {
+      c.save();
+      c.beginPath();
+      c.moveTo(top[0].x, top[0].y);
+      for (let i = 1; i < top.length; i++) c.lineTo(top[i].x, top[i].y);
+      c.closePath();
+      c.clip();
+      const light = c.createRadialGradient(island.x - 40, island.y - 46, 12, island.x, island.y, 210);
+      light.addColorStop(0, "rgba(255,252,230,.14)");
+      light.addColorStop(0.62, "rgba(255,252,230,0)");
+      light.addColorStop(1, "rgba(10,26,24,.12)");
+      c.fillStyle = light;
+      c.fill();
+      c.restore();
+    }
+    for (let i = 0; i < top.length; i++) {
+      const j = (i + 1) % top.length;
+      c.strokeStyle = top[j].x < top[i].x ? island.theme.rim : "#b9d68b44";
+      c.lineWidth = 2.3;
+      c.beginPath();
+      c.moveTo(top[i].x, top[i].y);
+      c.lineTo(top[j].x, top[j].y);
+      c.stroke();
+    }
+    for (const hill of hills) if (hill.island === island.id) drawHill(c, hill, island.theme);
+    for (let i = 0; i < 5; i++) {
+      const x = island.x + (noise2(island.id * 51 + i * 3) - 0.5) * 110;
+      const y = island.y + 32 + noise2(island.id * 19 + i * 6) * 20;
+      if (inside({ x, y }, top)) polygon(c, ring(x, y, 4 + noise2(i) * 5, 2 + noise2(i + 2) * 3, 5), "rgba(232,224,186,.3)");
+    }
+  }
+  if (bridges.length) {
+    c.save();
+    c.beginPath();
+    c.rect(-512, -512, g.worldWidth + 1024, g.worldHeight + 1024);
+    for (const { points } of islands) {
+      if (points.length < 3) continue;
+      c.moveTo(points[0].x, points[0].y);
+      for (let i = 1; i < points.length; i++) c.lineTo(points[i].x, points[i].y);
+      c.closePath();
+    }
+    c.clip("evenodd");
+    for (const { a, b } of bridges) drawBridge(c, a, b, shoreDepth(islands, a), shoreDepth(islands, b));
+    c.restore();
+  }
+}
+function drawScenery(c, item, time) {
+  c.save();
+  c.translate(item.x, item.y);
+  c.scale(item.scale, item.scale);
+  shadow(c, 10, 7, 17, 6, 0.18);
+  if (item.type === "pine") {
+    const sway = Math.sin(time * 0.8 + item.seed) * 0.8;
+    prism(c, ring(0, 1, 3, 2, 5), 20, "#5e5440");
+    for (let i = 0; i < 3; i++) {
+      const w = 21 - i * 5, y = -9 - i * 12;
+      polygon(c, [{ x: -w, y }, { x: sway, y: y - 27 }, { x: 0, y: y + 7 }], tint(item.color, 15));
+      polygon(c, [{ x: 0, y: y + 7 }, { x: sway, y: y - 27 }, { x: w, y }], tint(item.color, -19));
+      polygon(c, [{ x: -w, y }, { x: 0, y: y + 7 }, { x: w, y }], tint(item.color, -32));
+    }
+  } else if (item.type === "rock") {
+    const top = prism(c, ring(0, 0, 15, 9, 5), 10, "#8c9c8e");
+    polygon(c, [top[0], { x: -3, y: -19 }, top[2]], "#c0c7aa");
+    polygon(c, [top[2], { x: -3, y: -19 }, top[4]], "#9cab9d");
+  } else {
+    prism(c, ring(0, 2, 9, 5, 6), 5, "#a4ad92");
+    prism(c, ring(-1, 0, 5, 3, 6), 18, "#b4bda4");
+  }
+  c.restore();
+}
+
+// src/game/navigation.ts
+var EPSILON3 = 1e-7;
+var distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+function pathLength(points) {
+  return points.slice(1).reduce((sum, point, i) => sum + distance(points[i], point), 0);
+}
+function samplePath(points, travelled) {
+  if (!points.length) return { x: 0, y: 0, angle: 0, laneWidth: 0 };
+  let remaining = Math.max(0, travelled);
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1], b = points[i];
+    const length = distance(a, b);
+    if (length <= EPSILON3) continue;
+    if (remaining <= length || i === points.length - 1) {
+      const t = Math.min(1, remaining / length);
+      const laneWidth = Math.min(a.laneWidth ?? TROOP_LANE_SPACING, b.laneWidth ?? TROOP_LANE_SPACING);
+      return {
+        x: a.x + (b.x - a.x) * t,
+        y: a.y + (b.y - a.y) * t,
+        angle: Math.atan2(b.y - a.y, b.x - a.x),
+        laneWidth
+      };
+    }
+    remaining -= length;
+  }
+  const p = points[points.length - 1];
+  return { x: p.x, y: p.y, angle: 0, laneWidth: 0 };
+}
+function bypassFor(building, surfaces) {
+  const shore = surfaces.find((island) => island.id === building.id)?.points ?? [];
+  const bankDistance = shore.length >= 3 ? Math.min(...shore.map((a, i) => distanceToSegment(building, a, shore[(i + 1) % shore.length]))) : 64;
+  const radius = Math.max(1, Math.min(58, bankDistance - TROOP_FOOT_RADIUS - 1));
+  const laneWidth = Math.max(0, Math.min(TROOP_LANE_SPACING, bankDistance - radius - TROOP_FOOT_RADIUS - 1));
+  return { center: building, radius, laneWidth };
+}
+function radial(circle, toward) {
+  const dx = toward.x - circle.center.x, dy = toward.y - circle.center.y;
+  const length = Math.hypot(dx, dy) || 1;
+  return {
+    x: circle.center.x + dx / length * circle.radius,
+    y: circle.center.y + dy / length * circle.radius,
+    laneWidth: circle.laneWidth
+  };
+}
+function append(output, point) {
+  const last = output[output.length - 1];
+  if (last && distance(last, point) < EPSILON3) {
+    last.laneWidth = Math.min(last.laneWidth ?? TROOP_LANE_SPACING, point.laneWidth ?? TROOP_LANE_SPACING);
+  } else output.push({ ...point });
+}
+function arc(circle, a, b) {
+  const from = Math.atan2(a.y - circle.center.y, a.x - circle.center.x);
+  let turn = Math.atan2(b.y - circle.center.y, b.x - circle.center.x) - from;
+  while (turn > Math.PI) turn -= Math.PI * 2;
+  while (turn <= -Math.PI) turn += Math.PI * 2;
+  if (Math.abs(Math.abs(turn) - Math.PI) < EPSILON3 && Math.sin(from + turn / 2) < 0) turn = -turn;
+  const steps = Math.max(1, Math.ceil(Math.abs(turn) / (Math.PI / 24)));
+  return Array.from({ length: steps + 1 }, (_, i) => {
+    const angle = from + turn * i / steps;
+    return {
+      x: circle.center.x + Math.cos(angle) * circle.radius,
+      y: circle.center.y + Math.sin(angle) * circle.radius,
+      laneWidth: circle.laneWidth
+    };
+  });
+}
+function bypassCrossedKeeps(a, b, circles, output) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const lengthSquared = dx * dx + dy * dy;
+  if (lengthSquared < EPSILON3) {
+    append(output, b);
+    return;
+  }
+  const crossings = [];
+  for (const circle of circles) {
+    const x = a.x - circle.center.x, y = a.y - circle.center.y;
+    const projection = x * dx + y * dy;
+    const discriminant = projection * projection - lengthSquared * (x * x + y * y - circle.radius ** 2);
+    if (discriminant <= EPSILON3) continue;
+    const root = Math.sqrt(discriminant);
+    const entry = (-projection - root) / lengthSquared;
+    const exit = (-projection + root) / lengthSquared;
+    if (entry <= EPSILON3 || exit >= 1 - EPSILON3) continue;
+    crossings.push({ circle, entry, exit });
+  }
+  crossings.sort((p, q) => p.entry - q.entry);
+  for (const { circle, entry, exit } of crossings) {
+    const from = { x: a.x + dx * entry, y: a.y + dy * entry };
+    const to = { x: a.x + dx * exit, y: a.y + dy * exit };
+    for (const p of arc(circle, from, to)) append(output, p);
+  }
+  append(output, b);
+}
+function islandClearance(point, polygon2) {
+  let best = Infinity;
+  for (let i = 0, j = polygon2.length - 1; i < polygon2.length; j = i++) {
+    const d = distanceToSegment(point, polygon2[j], polygon2[i]);
+    if (d < best) best = d;
+  }
+  return best;
+}
+function shoreGuard(points, surfaces, buildings) {
+  if (points.length < 2 || !surfaces.length) return points;
+  const out = [points[0]];
+  for (let i = 1; i < points.length; i++) {
+    const a = out[out.length - 1];
+    const b = points[i];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const length = Math.hypot(dx, dy);
+    if (length < 24) {
+      out.push(b);
+      continue;
+    }
+    const steps = Math.max(2, Math.ceil(length / 7));
+    let runStart = -1;
+    let runIsland = null;
+    const flush = (runEnd) => {
+      if (runStart >= 0 && runIsland) {
+        const t = (runStart + runEnd) / (2 * steps);
+        const m = { x: a.x + dx * t, y: a.y + dy * t };
+        let px = 0, py = 0, bestEdge = Infinity;
+        const poly = runIsland.points;
+        for (let k = 0, j = poly.length - 1; k < poly.length; j = k++) {
+          const d = distanceToSegment(m, poly[j], poly[k]);
+          if (d < bestEdge) {
+            bestEdge = d;
+            px = poly[j].x - poly[k].x;
+            py = poly[j].y - poly[k].y;
+          }
+        }
+        const edgeLength = Math.hypot(px, py) || 1;
+        let nx = -py / edgeLength, ny = px / edgeLength;
+        if (!pointInPolygon({ x: m.x + nx * 3, y: m.y + ny * 3 }, poly)) {
+          nx = -nx;
+          ny = -ny;
+        }
+        let best = m;
+        let bestClear = bestEdge;
+        for (let off = 2; off <= 20; off += 2) {
+          const cand = { x: m.x + nx * off, y: m.y + ny * off };
+          if (!pointInPolygon(cand, poly)) continue;
+          if (buildings.some((keep) => Math.hypot(keep.x - cand.x, keep.y - cand.y) < 52)) continue;
+          const clear = islandClearance(cand, poly);
+          if (clear > bestClear) {
+            best = cand;
+            bestClear = clear;
+          }
+          if (bestClear >= 7) break;
+        }
+        if (best !== m) {
+          out.push({
+            x: best.x,
+            y: best.y,
+            laneWidth: Math.max(0, Math.min(TROOP_LANE_SPACING, bestClear - TROOP_FOOT_RADIUS - 1))
+          });
+        }
+      }
+      runStart = -1;
+      runIsland = null;
+    };
+    for (let s = 1; s < steps; s++) {
+      const p = { x: a.x + dx * s / steps, y: a.y + dy * s / steps };
+      const island = surfaces.find((item) => pointInPolygon(p, item.points)) ?? null;
+      const clear = island ? islandClearance(p, island.points) : Infinity;
+      if (island && clear < 7) {
+        if (runStart < 0) {
+          runStart = s;
+          runIsland = island;
+        }
+      } else flush(s - 1);
+    }
+    flush(steps - 1);
+    out.push(b);
+  }
+  return out;
+}
+function buildMarchPath(route, surfaces, buildings = route) {
+  if (!route.length) return [];
+  const obstacles = buildings.filter((b) => b !== route[0] && b !== route[route.length - 1]);
+  const circles = obstacles.map((building) => bypassFor(building, surfaces));
+  const nodePoints = [{ x: route[0].x, y: route[0].y, laneWidth: TROOP_LANE_SPACING }];
+  for (let i = 1; i < route.length - 1; i++) {
+    const circle = bypassFor(route[i], surfaces);
+    const entry = radial(circle, route[i - 1]);
+    const exit = radial(circle, route[i + 1]);
+    for (const p of arc(circle, entry, exit)) append(nodePoints, p);
+  }
+  const end = route[route.length - 1];
+  append(nodePoints, { x: end.x, y: end.y, laneWidth: TROOP_LANE_SPACING });
+  const result = [{ ...nodePoints[0] }];
+  for (let i = 1; i < nodePoints.length; i++) {
+    const a = nodePoints[i - 1], b = nodePoints[i];
+    if (distance(a, b) < 15) append(result, b);
+    else bypassCrossedKeeps(a, b, circles, result);
+  }
+  return shoreGuard(result, surfaces, buildings);
+}
+
+// src/game/tower-range.ts
+function towerCanTarget(tower, target) {
+  if (tower.type !== "tower" || target.hp <= 0) return false;
+  if (Math.hypot(target.x - tower.x, target.y - tower.y) >= CFG.range) return false;
+  if (tower.o === 0) return target.o !== 0;
+  return target.o !== tower.o;
+}
+function drawTowerRanges(c, g, time = 0) {
+  const scale = Math.max(0.35, g.view.s);
+  c.save();
+  for (const b of g.bs) {
+    if (b.type !== "tower") continue;
+    const active = b.o !== 0;
+    const focus = g.hover === b || g.sels.includes(b) || g.ptr?.draft.includes(b);
+    const color = active ? COL[b.o] : "#d0d9cf";
+    const pulse = 0.75 + 0.25 * Math.sin(time * 2.1 + b.id * 1.7);
+    c.globalCompositeOperation = "lighter";
+    const glow = c.createRadialGradient(b.x, b.y, CFG.range * 0.1, b.x, b.y, CFG.range * 1.06);
+    glow.addColorStop(0, color + "00");
+    glow.addColorStop(0.62, color + (active ? "10" : "07"));
+    glow.addColorStop(0.88, color + (active ? "2c" : "16"));
+    glow.addColorStop(1, color + "00");
+    c.fillStyle = glow;
+    c.beginPath();
+    c.arc(b.x, b.y, CFG.range * 1.06, 0, Math.PI * 2);
+    c.fill();
+    c.strokeStyle = color + (active ? "38" : "1c");
+    c.lineWidth = (focus ? 14 : 10) / scale;
+    c.beginPath();
+    c.arc(b.x, b.y, CFG.range, 0, Math.PI * 2);
+    c.stroke();
+    c.setLineDash(active ? [] : [5 / scale, 6 / scale]);
+    c.strokeStyle = "rgba(4,26,30,.55)";
+    c.lineWidth = (focus ? 5.5 : 4) / scale;
+    c.beginPath();
+    c.arc(b.x, b.y, CFG.range, 0, Math.PI * 2);
+    c.stroke();
+    c.strokeStyle = active ? color + "ff" : color + "b8";
+    c.lineWidth = (focus ? 3 : 2) / scale;
+    c.stroke();
+    c.setLineDash([]);
+    if (active) {
+      const sweepAngle = time * (g.haloSpin ?? 1.35) + b.id;
+      for (let k = 0; k < 3; k++) {
+        const a0 = sweepAngle + k / 3 * Math.PI * 2;
+        const px = b.x + Math.cos(a0) * CFG.range, py = b.y + Math.sin(a0) * CFG.range;
+        const spark = c.createRadialGradient(px, py, 0, px, py, 26 / scale);
+        spark.addColorStop(0, "#ffffff" + (focus ? "aa" : "77"));
+        spark.addColorStop(0.35, color + "88");
+        spark.addColorStop(1, color + "00");
+        c.fillStyle = spark;
+        c.beginPath();
+        c.arc(px, py, 26 / scale, 0, Math.PI * 2);
+        c.fill();
+      }
+      c.fillStyle = color + (focus ? "1c" : "0e");
+      c.beginPath();
+      c.arc(b.x, b.y, CFG.range, 0, Math.PI * 2);
+      c.fill();
+      c.strokeStyle = "#f0f5dfcc";
+      c.lineWidth = (1.6 + pulse * 1.2) / scale;
+      c.shadowColor = color;
+      c.shadowBlur = 8 / scale;
+      for (let k = 0; k < 12; k++) {
+        const angle = k * Math.PI / 6;
+        c.beginPath();
+        c.moveTo(b.x + Math.cos(angle) * (CFG.range - 4 / scale), b.y + Math.sin(angle) * (CFG.range - 4 / scale));
+        c.lineTo(b.x + Math.cos(angle) * (CFG.range + 2 / scale), b.y + Math.sin(angle) * (CFG.range + 2 / scale));
+        c.stroke();
+      }
+      c.shadowBlur = 0;
+    } else {
+      c.setLineDash([6 / scale, 7 / scale]);
+      c.strokeStyle = color + (pulse > 0.9 ? "5a" : "3a");
+      c.lineWidth = (focus ? 3 : 2) / scale;
+      c.beginPath();
+      c.arc(b.x, b.y, CFG.range * (0.97 + pulse * 0.02), 0, Math.PI * 2);
+      c.stroke();
+      c.setLineDash([]);
+      c.strokeStyle = "#eef2e6" + (pulse > 0.9 ? "88" : "55");
+      c.lineWidth = 1.8 / scale;
+      for (let k = 0; k < 4; k++) {
+        const angle = k * Math.PI / 2 + Math.PI / 4;
+        c.beginPath();
+        c.moveTo(b.x + Math.cos(angle) * (CFG.range - 5 / scale), b.y + Math.sin(angle) * (CFG.range - 5 / scale));
+        c.lineTo(b.x + Math.cos(angle) * (CFG.range + 1 / scale), b.y + Math.sin(angle) * (CFG.range + 1 / scale));
+        c.stroke();
+      }
+    }
+    c.globalCompositeOperation = "source-over";
+  }
+  c.restore();
+}
+
+// src/game/engine.ts
+function distToSeg(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 ? ((px - x1) * dx + (py - y1) * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (x1 + dx * t), py - (y1 + dy * t));
+}
+var Game = class {
+  constructor(i, demo = false, levelOverride) {
+    __publicField(this, "i");
+    __publicField(this, "L");
+    __publicField(this, "bs", []);
+    /** Faction ids present at match start; retained in the HUD even after elimination. */
+    __publicField(this, "participants", []);
+    __publicField(this, "sq", []);
+    __publicField(this, "fx", []);
+    __publicField(this, "links", []);
+    __publicField(this, "adj", []);
+    __publicField(this, "t", 0);
+    /** درصدِ اعزام (۲۰ / ۶۰ / ۸۰) */
+    __publicField(this, "pct", 60);
+    __publicField(this, "run", true);
+    __publicField(this, "paused", false);
+    __publicField(this, "over", false);
+    __publicField(this, "demo", false);
+    /** اگر خاموش باشد، گروه‌های دشمن در مسیر از کنار هم عبور می‌کنند. */
+    __publicField(this, "fieldCombat", true);
+    /** سقف نهایی تولید برای قلعه‌های دو تیم */
+    __publicField(this, "baseCap", CFG.cap);
+    /**
+     * اگر روشن باشد، نیروها می‌توانند از کنار هر قلعه (خنثی یا دشمن) عبور کنند
+     * تا به هدف برسند؛ پل‌های اضافه‌ای رسم نمی‌شود.
+     */
+    __publicField(this, "openRoads", true);
+    /** حداقل فاصلهٔ پل بین دو قلعهٔ همسایه (پیکسل) */
+    __publicField(this, "minRoadLength", 0);
+    /** اگر روشن باشد، راه‌ها کاملاً رندوم انتخاب می‌شوند. */
+    __publicField(this, "randomRoads", false);
+    /** مولد اعداد تصادفیِ قابل‌کنترل، تا نقشهٔ رندوم بازتولیدپذیر بماند. */
+    __publicField(this, "roadRandom", Math.random);
+    /** تایمر کاهش هر ثانیه ۱ نیرو برای قلعه‌های فراتر از سقف */
+    __publicField(this, "decayTimer", 0);
+    __publicField(this, "shake", 0);
+    __publicField(this, "sels", []);
+    __publicField(this, "sel", null);
+    __publicField(this, "ptr", null);
+    /** مسیر محوشوندهٔ کشیدن برای جلوهٔ بصری پس از رها کردن */
+    __publicField(this, "ghostTrail", []);
+    __publicField(this, "hover", null);
+    __publicField(this, "preview", null);
+    __publicField(this, "view", { s: 1, ox: 0, oy: 0 });
+    __publicField(this, "worldWidth", CFG.W);
+    __publicField(this, "worldHeight", CFG.H);
+    __publicField(this, "largeMap", false);
+    /** سرعتِ چرخشِ نورهای دور برج (صفر = بی‌حرکت) */
+    __publicField(this, "haloSpin", 1.35);
+    /** شفافیتِ نقطه‌چینِ مسیر حمله (۰..۱) */
+    __publicField(this, "attackDash", 1);
+    /** مقیاسِ اندازهٔ کوه‌های دریایی (از تنظیماتِ سراسری) — فقط ظاهر */
+    /** ارتفاعِ نوارِ بالای صفحه (پیکسل) که نقشه نباید زیرش برود */
+    __publicField(this, "hudInset", 0);
+    /** برج‌های خنثی از خودشان دفاع می‌کنند */
+    __publicField(this, "neutralDefense", true);
+    __publicField(this, "zoom", 1);
+    __publicField(this, "panX", 0);
+    __publicField(this, "panY", 0);
+    __publicField(this, "aiT", [0, 2.5, 3, 3, 3]);
+    __publicField(this, "lastHoverId", -1);
+    __publicField(this, "lastAllyClick", null);
+    __publicField(this, "onToast", () => {
+    });
+    __publicField(this, "onFinish", () => {
+    });
+    __publicField(this, "onDemoReset", () => {
+    });
+    this.i = i;
+    this.L = levelOverride ?? LEVELS[i] ?? LEVELS[0];
+    this.demo = demo;
+    this.build();
+  }
+  /* ================= ساخت مرحله ================= */
+  build() {
+    this.worldWidth = this.L.worldWidth ?? CFG.W;
+    this.worldHeight = this.L.worldHeight ?? CFG.H;
+    this.largeMap = this.L.largeMap ?? false;
+    this.zoom = 1;
+    this.panX = 0;
+    this.panY = 0;
+    this.bs = this.L.b.map((d, k) => ({
+      id: k,
+      x: d[0],
+      y: d[1],
+      o: d[2],
+      type: d[3],
+      army: createArmy(producedUnit(d[3]), d[2] === 0 ? Math.min(d[4], CFG.neutralCap) : d[4]),
+      get tr() {
+        return armyCount(this.army);
+      },
+      set tr(value) {
+        this.army = createArmy(producedUnit(this.type), value);
+      },
+      cap: d[2] === 0 ? CFG.neutralCap : Math.min(CFG.capStart, this.baseCap),
+      lvl: 1,
+      capTimer: 0,
+      pt: 0,
+      tt: 0,
+      fl: 0,
+      hit: 0
+    }));
+    this.participants = Array.from(new Set(this.bs.map((b) => b.o).filter((owner) => owner !== 0))).sort();
+    this.sq = [];
+    this.fx = [];
+    this.links = [];
+    this.t = 0;
+    this.sels = [];
+    this.sel = null;
+    this.ptr = null;
+    this.ghostTrail = [];
+    this.hover = null;
+    this.preview = null;
+    this.lastAllyClick = null;
+    this.over = false;
+    this.paused = false;
+    this.run = true;
+    const maxOwner = Math.max(2, ...this.bs.map((b) => b.o));
+    this.aiT = Array.from({ length: maxOwner + 1 }, (_, owner) => owner === 1 ? 2.5 : owner >= 2 ? 3 : 0);
+    this.decayTimer = 0;
+    this.rebuildRoads();
+  }
+  /**
+   * فقط شبکهٔ راه‌ها را از نو می‌سازد (بدونِ دست‌زدن به وضعیتِ نبرد).
+   * build() پس از بازنشانیِ کامل هم همین را صدا می‌زند.
+   */
+  rebuildRoads() {
+    this.links = [];
+    this.adj = [];
+    const bs = this.bs;
+    if (!bs.length) return;
+    const pairs = [];
+    for (let a = 0; a < bs.length; a++)
+      for (let b = a + 1; b < bs.length; b++) pairs.push([a, b, Math.hypot(bs[a].x - bs[b].x, bs[a].y - bs[b].y)]);
+    pairs.sort((p, q) => p[2] - q[2]);
+    const u = bs.map((_, k) => k);
+    const f = (n) => u[n] === n ? n : u[n] = f(u[n]);
+    const minLength = this.minRoadLength;
+    const linkCap = Math.max(bs.length - 1, Math.round(bs.length * 1.35));
+    for (const [a, b, d] of pairs) {
+      if (d < minLength) continue;
+      if (this.links.length >= linkCap) break;
+      if (this.randomRoads) {
+        if (this.roadRandom() < 0.3 && this.links.length < linkCap) {
+          this.links.push([a, b]);
+          u[f(a)] = f(b);
+        }
+      } else if (f(a) !== f(b)) {
+        u[f(a)] = f(b);
+        this.links.push([a, b]);
+      } else if (!this.largeMap && d < 300) {
+        this.links.push([a, b]);
+      }
+    }
+    this.adj = bs.map(() => []);
+    this.links.forEach(([a, b]) => {
+      this.adj[a].push(b);
+      this.adj[b].push(a);
+    });
+    this.guaranteeConnectivity();
+  }
+  /**
+   * تضمین می‌کند همهٔ قلعه‌ها در یک شبکهٔ پیوسته باشند: ابتدا قلعه‌های رهاشده به نزدیک‌ترین
+   * قلعهٔ وصل‌شده وصل می‌شوند و اگر هنوز جزیرهٔ جدا باقی مانده بود، کوتاه‌ترین پلِ بینِ جزایر
+   * ساخته می‌شود. این کار حتی حداکثر طول پل را نقض می‌کند، چون «نرسیدن به هیچ‌جا» بدتر از
+   * یک پل بلند است.
+   */
+  guaranteeConnectivity() {
+    const bs = this.bs;
+    const connected = (from, to) => {
+      const seen = /* @__PURE__ */ new Set([from]);
+      const walk = (n) => {
+        for (const m of this.adj[n]) if (!seen.has(m)) {
+          seen.add(m);
+          walk(m);
+        }
+      };
+      walk(from);
+      return seen.has(to);
+    };
+    const add = (a, b) => {
+      this.links.push([a, b]);
+      this.adj[a].push(b);
+      this.adj[b].push(a);
+    };
+    for (let a = 0; a < bs.length; a++) {
+      if (this.adj[a].length) continue;
+      let nearest = -1;
+      let nearestD = Infinity;
+      for (let b = 0; b < bs.length; b++) {
+        if (b === a) continue;
+        const d = Math.hypot(bs[a].x - bs[b].x, bs[a].y - bs[b].y);
+        if (d < nearestD) {
+          nearestD = d;
+          nearest = b;
+        }
+      }
+      if (nearest >= 0) add(a, nearest);
+    }
+    for (let guard = 0; guard < bs.length; guard++) {
+      let bestA = -1, bestB = -1, bestD = Infinity;
+      for (let a = 0; a < bs.length; a++)
+        for (let b = a + 1; b < bs.length; b++) {
+          if (connected(a, b)) continue;
+          const d = Math.hypot(bs[a].x - bs[b].x, bs[a].y - bs[b].y);
+          if (d < bestD) {
+            bestD = d;
+            bestA = a;
+            bestB = b;
+          }
+        }
+      if (bestA < 0) break;
+      add(bestA, bestB);
+    }
+  }
+  fxAdd(o) {
+    this.fx.push({ t: 0, l: 1, ...o });
+    if (this.fx.length > 90) this.fx.splice(0, this.fx.length - 90);
+  }
+  /** قوانین راه‌ها را اعمال می‌کند و در صورت نیاز نقشه را دوباره می‌سازد. */
+  /**
+   * تغییرِ قوانینِ راه در میانهٔ نبرد.
+   * عمداً فقط گرافِ راه بازسازی می‌شود؛ قلعه‌ها، نیروها، لشکرهای در حرکت،
+   * تایمرها و وضعیتِ برد/باخت دست‌نخورده می‌مانند. (پیش‌تر اینجا build() صدا
+   * زده می‌شد و هر تغییرِ تنظیمات کلِ نبرد را از صفر می‌کرد.)
+   */
+  setRoadRules(options) {
+    const before = { openRoads: this.openRoads, minRoadLength: this.minRoadLength, randomRoads: this.randomRoads };
+    if (options.openRoads !== void 0) this.openRoads = options.openRoads;
+    if (options.minRoadLength !== void 0) this.minRoadLength = Math.max(0, Math.min(900, Math.floor(options.minRoadLength)));
+    if (options.randomRoads !== void 0) this.randomRoads = options.randomRoads;
+    const changed = before.openRoads !== this.openRoads || before.minRoadLength !== this.minRoadLength || before.randomRoads !== this.randomRoads;
+    if (changed) this.rebuildRoads();
+  }
+  setMaxTroops(value) {
+    const cap = Number.isFinite(value) ? Math.max(1, Math.min(1e3, Math.floor(value))) : CFG.cap;
+    this.baseCap = cap;
+    for (const b of this.bs) {
+      if (b.o === 0) {
+        b.cap = CFG.neutralCap;
+        b.lvl = 1;
+        b.capTimer = 0;
+        continue;
+      }
+      const start = Math.min(CFG.capStart, cap);
+      const previous = b.cap;
+      b.cap = Math.max(start, Math.min(b.cap, cap));
+      b.lvl = 1 + Math.ceil((b.cap - start) / 10);
+      if (b.cap !== previous) b.capTimer = 0;
+    }
+  }
+  zoomBy(delta) {
+    if (delta === 0) {
+      this.zoom = 1;
+      this.panX = 0;
+      this.panY = 0;
+    } else {
+      this.zoom = Math.max(1, Math.min(3, this.zoom + delta));
+    }
+    this.preview = this.computePreview();
+  }
+  /**
+   * زوم به سمت یک نقطهٔ مشخص روی صفحه، طوری که همان نقطه زیر نشانگر بماند.
+   * مختصات صفحه‌ای و اندازهٔ پنجره لازم است.
+   */
+  zoomAt(delta, screenX, screenY, viewWidth, viewHeight) {
+    const before = this.zoom;
+    this.zoomBy(delta);
+    if (this.zoom === before) return;
+    const geo = this.fitGeometry(viewWidth, viewHeight);
+    const worldX = (screenX - this.view.ox) / this.view.s;
+    const worldY = (screenY - this.view.oy) / this.view.s;
+    this.panX += screenX - (this.view.ox + worldX * geo.s);
+    this.panY += screenY - (this.view.oy + worldY * geo.s);
+    this.clampPan(viewWidth, viewHeight);
+  }
+  /** هندسهٔ جاشدنِ نقشه در ناحیهٔ زیرِ نوارِ بالا (هم‌راستا با render.ts). */
+  fitGeometry(viewWidth, viewHeight) {
+    const top = this.demo ? 0 : Math.max(0, Math.min(viewHeight * 0.26, this.hudInset || 0));
+    const areaH = Math.max(140, viewHeight - top);
+    const s = Math.min(viewWidth / this.worldWidth, areaH / this.worldHeight) * 0.94 * this.zoom;
+    return { s, areaH };
+  }
+  /** دور نگه‌داشتن جابه‌جایی نقشه درون کادر پنجره */
+  clampPan(viewWidth, viewHeight) {
+    const { s, areaH } = this.fitGeometry(viewWidth, viewHeight);
+    const maxX = Math.max(0, (this.worldWidth * s - viewWidth) / 2);
+    const maxY = Math.max(0, (this.worldHeight * s - areaH) / 2);
+    this.panX = Math.max(-maxX, Math.min(maxX, this.panX));
+    this.panY = Math.max(-maxY, Math.min(maxY, this.panY));
+  }
+  panBy(dx, dy) {
+    this.panX += dx;
+    this.panY += dy;
+  }
+  /* ================= مسیر و اعزام ================= */
+  findRoute(from, to) {
+    const queue = [from.id];
+    const prev = /* @__PURE__ */ new Map([[from.id, null]]);
+    for (let i = 0; i < queue.length; i++) {
+      const id2 = queue[i];
+      if (id2 === to.id) break;
+      for (const next of this.adj[id2]) {
+        if (prev.has(next)) continue;
+        const castle = this.bs[next];
+        if (!this.openRoads && next !== to.id && castle.o !== from.o) continue;
+        prev.set(next, id2);
+        queue.push(next);
+      }
+    }
+    if (!prev.has(to.id)) return null;
+    const route = [];
+    let id = to.id;
+    while (id !== null) {
+      route.unshift(this.bs[id]);
+      id = prev.get(id) ?? null;
+    }
+    return route;
+  }
+  sendN(from, to, n, route = null) {
+    n = Math.min(Math.floor(n), from.tr);
+    if (!Number.isFinite(n) || n < 1 || from === to) return false;
+    route = route || [from, to];
+    const dispatched = takeArmy(from.army, n);
+    const waypoints = buildMarchPath(route, landscapeFor(this).islands, this.bs);
+    const len = pathLength(waypoints);
+    for (const unit of TROOP_TYPES) {
+      if (dispatched[unit] <= 0) continue;
+      const squad = {
+        o: from.o,
+        from,
+        to,
+        route,
+        waypoints,
+        unit,
+        hp: dispatched[unit],
+        get n() {
+          return unitCount(this.hp, this.unit);
+        },
+        set n(value) {
+          this.hp = Math.max(0, Math.floor(value)) * UNITS[this.unit].power;
+        },
+        x: from.x,
+        y: from.y,
+        d: 0,
+        len,
+        sp: CFG.speed * UNITS[unit].speed,
+        id: Math.random() * 9,
+        ang: 0
+      };
+      this.sq.push(squad);
+    }
+    this.fxAdd({ k: "txt", x: from.x, y: from.y - 52, s: "-" + fa(n), c: "#ffffff" });
+    if (from.o === 1) sfx.send();
+    return true;
+  }
+  arrive(s) {
+    const t = s.to;
+    if (t.o === s.o) {
+      t.army[s.unit] += s.hp;
+      t.fl = Math.max(t.fl, 0.35);
+      this.fxAdd({ k: "txt", x: t.x, y: t.y - 58, s: "+" + fa(s.n), c: COL[s.o] });
+      return;
+    }
+    const m = defOf(t);
+    const dv = armyPower(t.army) * m;
+    t.hit = 1;
+    this.fxAdd({ k: "ring", x: t.x, y: t.y, c: "#ffffff", l: 0.6 });
+    this.shake = Math.min(1, this.shake + 0.35);
+    if (s.hp > dv + 1e-8) {
+      const prev = t.o;
+      t.o = s.o;
+      t.army = emptyArmy();
+      t.army[s.unit] = s.hp - dv;
+      t.pt = 0;
+      t.fl = 1;
+      t.lvl = 1;
+      t.cap = Math.min(CFG.capStart, this.baseCap);
+      t.capTimer = 0;
+      this.fxAdd({ k: "ring", x: t.x, y: t.y, c: COL[s.o], l: 0.95, r: 90 });
+      this.fxAdd({ k: "burst", x: t.x, y: t.y - 10, c: COL[s.o], l: 0.7 });
+      if (s.o === 1) {
+        this.onToast(prev === 0 ? "ساختمان تصرف شد!" : "ساختمان دشمن گرفته شد!");
+        sfx.capture();
+        playCaptureSound();
+      } else if (prev === 1) {
+        this.onToast("یک ساختمان را از دست دادی!");
+        sfx.lose();
+      }
+    } else {
+      const before = t.tr;
+      damageArmy(t.army, s.hp / m);
+      const lost = before - t.tr;
+      this.fxAdd({ k: "txt", x: t.x, y: t.y - 58, s: lost ? "-" + fa(lost) : "آسیب", c: "#ffffff" });
+      if (s.o === 1) this.onToast("حمله دفع شد؛ نیروی بیشتری بفرست");
+      sfx.repel();
+    }
+  }
+  /* ================= انتخاب کشیدنی ================= */
+  buildingAt(x, y) {
+    let best = null;
+    let bd = 1;
+    for (const b of this.bs) {
+      const d = Math.hypot((b.x - x) / 54, (b.y - 18 - y) / 76);
+      if (d < bd) {
+        bd = d;
+        best = b;
+      }
+    }
+    return best;
+  }
+  /** لغو کامل انتخاب‌ها (کلیک روی زمین خالی یا کلید Escape/B) */
+  deselectAll() {
+    this.sels = [];
+    this.sel = null;
+    this.lastAllyClick = null;
+    this.preview = null;
+  }
+  /** نیروی قابل ارسال از یک قلعه با درصد فعلی */
+  amountOf(b) {
+    return Math.floor(b.tr * this.pct / 100);
+  }
+  dispatchPower(b, amount = this.amountOf(b)) {
+    return armyPower(selectArmy(b.army, amount));
+  }
+  computePreview() {
+    const target = this.hover;
+    if (!target) return null;
+    const drafted = this.ptr && this.ptr.draft.length ? this.ptr.draft : this.sels;
+    if (target.o === 1) {
+      const others = drafted.filter((s) => s !== target && s.o === 1);
+      if (!others.length) return { target, sources: [], total: 0, power: 0, need: 0, ok: true, blocked: 0, mode: "select" };
+      let total2 = 0;
+      let power2 = 0;
+      let blocked2 = 0;
+      const src2 = [];
+      for (const s of others) {
+        const n = this.amountOf(s);
+        if (n < 1) continue;
+        if (!this.findRoute(s, target)) {
+          blocked2++;
+          continue;
+        }
+        total2 += n;
+        power2 += this.dispatchPower(s, n);
+        src2.push(s);
+      }
+      return { target, sources: src2, total: total2, power: power2, need: 0, ok: total2 > 0, blocked: blocked2, mode: "reinforce" };
+    }
+    if (!drafted.length) return { target, sources: [], total: 0, power: 0, need: armyPower(target.army) * defOf(target), ok: false, blocked: 0, mode: "attack" };
+    let total = 0;
+    let power = 0;
+    let blocked = 0;
+    const src = [];
+    for (const s of drafted) {
+      if (s === target) continue;
+      const n = this.amountOf(s);
+      if (n < 1) continue;
+      if (!this.findRoute(s, target)) {
+        blocked++;
+        continue;
+      }
+      total += n;
+      power += this.dispatchPower(s, n);
+      src.push(s);
+    }
+    const need = armyPower(target.army) * defOf(target);
+    return { target, sources: src, total, power, need, ok: power > need + 1e-8, blocked, mode: "attack" };
+  }
+  down(id, wx, wy, shift) {
+    if (this.over || this.paused) return;
+    const b = this.buildingAt(wx, wy);
+    const startAlly = b && b.o === 1 ? b : null;
+    this.ptr = {
+      id,
+      sx: wx,
+      sy: wy,
+      x: wx,
+      y: wy,
+      lx: wx,
+      ly: wy,
+      shift,
+      moved: false,
+      startB: startAlly,
+      draft: startAlly ? [startAlly] : [],
+      trail: [{ x: wx, y: wy }]
+    };
+    this.ghostTrail = [];
+    this.hover = b;
+    this.lastHoverId = b ? b.id : -1;
+    this.preview = this.computePreview();
+  }
+  /** هر قلعهٔ خودی که نشانگر هنگام کشیدن از رویش عبور کند، به انتخاب اضافه می‌شود */
+  sweepSelect(p, x1, y1, x2, y2) {
+    for (const b of this.bs) {
+      if (b.o !== 1 || p.draft.includes(b)) continue;
+      if (distToSeg(b.x / 46, (b.y - 18) / 66, x1 / 46, y1 / 66, x2 / 46, y2 / 66) <= 1) {
+        p.draft.push(b);
+        this.fxAdd({ k: "ring", x: b.x, y: b.y, c: "#3ddc84", l: 0.45, r: 60 });
+        sfx.select();
+      }
+    }
+  }
+  move(id, wx, wy) {
+    const p = this.ptr;
+    if (p) {
+      if (p.id !== id) return;
+      if (!p.moved && Math.hypot(wx - p.sx, wy - p.sy) > 8) p.moved = true;
+      if (p.moved) {
+        this.sweepSelect(p, p.lx, p.ly, wx, wy);
+        if (Math.hypot(wx - p.trail[p.trail.length - 1].x, wy - p.trail[p.trail.length - 1].y) > 5) {
+          p.trail.push({ x: wx, y: wy });
+          if (p.trail.length > 220) p.trail.shift();
+        }
+      }
+      p.lx = wx;
+      p.ly = wy;
+      p.x = wx;
+      p.y = wy;
+    }
+    const h = this.buildingAt(wx, wy);
+    if ((h ? h.id : -1) !== this.lastHoverId) {
+      this.lastHoverId = h ? h.id : -1;
+      if (h && this.ptr) sfx.hover();
+    }
+    this.hover = h;
+    this.preview = this.computePreview();
+  }
+  up(id, wx, wy) {
+    const p = this.ptr;
+    if (!p || p.id !== id) return;
+    this.ptr = null;
+    if (p.trail.length > 1) this.ghostTrail = p.trail.map((pt) => ({ ...pt, t: 0 }));
+    if (this.over || this.paused) return;
+    this.hover = this.buildingAt(wx, wy);
+    this.move(id, wx, wy);
+    const target = this.hover;
+    const drafted = p.draft.length ? p.draft : this.sels;
+    if (target) {
+      if (target.o === 1) {
+        if (p.moved) {
+          this.lastAllyClick = null;
+          this.sels = Array.from(/* @__PURE__ */ new Set([...this.sels, ...p.draft]));
+          this.sel = this.sels[0] || null;
+          if (this.sels.length) {
+            sfx.select();
+            this.onToast(fa(this.sels.length) + " قلعه انتخاب شد؛ برای انتقال روی مقصد دوبار کلیک کن");
+          }
+        } else {
+          const now = Date.now();
+          const last = this.lastAllyClick;
+          if (last && last.target === target && now - last.at <= 520 && last.sources.length) {
+            this.lastAllyClick = null;
+            this.reinforce(target, last.sources);
+          } else {
+            const sources = this.sels.filter((s) => s !== target && s.o === target.o);
+            this.lastAllyClick = { target, sources: [...sources], at: now };
+            this.addToSelection(target);
+            if (sources.length) this.onToast("برای انتقال نیرو، دوباره روی قلعهٔ هم‌تیمی کلیک کن");
+          }
+        }
+      } else {
+        this.lastAllyClick = null;
+        this.attack(target, drafted);
+      }
+      this.preview = null;
+      return;
+    }
+    if (p.moved) {
+      this.sels = p.shift ? Array.from(/* @__PURE__ */ new Set([...this.sels, ...p.draft])) : p.draft;
+      this.sel = this.sels[0] || null;
+      if (this.sels.length) {
+        sfx.select();
+        if (this.sels.length > 1) this.onToast(fa(this.sels.length) + " قلعه انتخاب شد — حالا روی هدف رها کن");
+      }
+    } else if (p.startB) {
+      this.addToSelection(p.startB);
+    } else {
+      this.sels = [];
+      this.sel = null;
+    }
+    this.preview = null;
+  }
+  /**
+   * هر کلیک روی یک قلعهٔ خودی، آن قلعه را به انتخاب‌ها اضافه می‌کند.
+   * کلیک دوباره روی همان قلعه آن را حذف نمی‌کند؛ شمار انتخاب‌ها هرگز کم نمی‌شود.
+   * برای برداشتن یک قلعه از انتخاب، Shift+کلیک یا کلید B (لغو همه) استفاده می‌شود.
+   */
+  addToSelection(target) {
+    if (!this.sels.includes(target)) {
+      this.sels = [...this.sels, target];
+      sfx.select();
+    } else {
+      sfx.deselect();
+    }
+    this.sel = this.sels[0] || null;
+  }
+  /** انتقال نیروی قلعه‌های هم‌رنگ به یک قلعهٔ مقصد */
+  reinforce(target, sources) {
+    if (!target.o) return 0;
+    const list = Array.from(new Set(sources)).filter((s) => s !== target && s.o === target.o);
+    let sent = 0;
+    let blocked = 0;
+    let empty = 0;
+    for (const source of list) {
+      const n = this.amountOf(source);
+      if (n < 1) {
+        empty++;
+        continue;
+      }
+      const route = this.findRoute(source, target);
+      if (!route) {
+        blocked++;
+        this.fxAdd({ k: "txt", x: source.x, y: source.y - 60, s: "مسیر بسته", c: "#ffd166" });
+        continue;
+      }
+      if (this.sendN(source, target, n, route)) sent++;
+    }
+    if (list.length) {
+      this.sels = [];
+      this.sel = null;
+    } else if (!this.sels.includes(target)) {
+      this.sels = [...this.sels, target];
+      this.sel = this.sels[0] || null;
+    }
+    if (sent) {
+      this.fxAdd({ k: "ring", x: target.x, y: target.y, c: COL[target.o], l: 0.75, r: 72 });
+      this.onToast(sent > 1 ? fa(sent) + " گروه نیروی کمکی اعزام شدند" : "نیروی کمکی اعزام شد");
+    } else if (blocked) this.onToast("مسیر بازی تا آن قلعه وجود ندارد");
+    else if (empty) this.onToast("نیروی کافی برای انتقال وجود ندارد");
+    else this.onToast("ابتدا قلعه‌های هم‌رنگ را انتخاب کن");
+    return sent;
+  }
+  cancel() {
+    this.ptr = null;
+    this.preview = null;
+  }
+  /** حمله گروهی به یک قلعه هدف */
+  attack(target, sources) {
+    const list = sources.filter((s) => s.o === 1 && s !== target);
+    if (!list.length) {
+      this.onToast("ابتدا قلعه‌های سبز خودت را انتخاب کن");
+      return;
+    }
+    let sent = 0;
+    let blocked = 0;
+    let empty = 0;
+    for (const s of list) {
+      const n = this.amountOf(s);
+      if (n < 1) {
+        empty++;
+        continue;
+      }
+      const route = this.findRoute(s, target);
+      if (!route) {
+        blocked++;
+        this.fxAdd({ k: "txt", x: s.x, y: s.y - 60, s: "مسیر بسته", c: "#ffd166" });
+        continue;
+      }
+      if (this.sendN(s, target, n, route)) sent++;
+    }
+    this.sels = [];
+    this.sel = null;
+    if (sent) this.onToast(sent > 1 ? fa(sent) + " گروه به سمت هدف اعزام شدند" : "نیروها اعزام شدند");
+    else if (blocked) this.onToast("مسیر بازی تا مقصد وجود ندارد؛ قلعه‌های میانی را بگیر");
+    else if (empty) this.onToast("نیروی کافی نیست");
+  }
+  /** حمله به همه اهداف ممکن از انتخاب فعلی (میان‌بر کیبورد) */
+  selectAll() {
+    this.sels = this.bs.filter((b) => b.o === 1);
+    this.sel = this.sels[0] || null;
+    if (this.sels.length) {
+      sfx.select();
+      this.onToast("همه قلعه‌های تو انتخاب شدند");
+    }
+  }
+  /* ================= هوش مصنوعی ================= */
+  ai(dt, o) {
+    this.aiT[o] -= dt;
+    if (this.aiT[o] > 0) return;
+    const base = o === 1 ? this.demo ? this.L.ai * 0.8 : 0.5 : this.L.ai;
+    const pc = this.bs.filter((b) => b.o === o).length;
+    const ec = this.bs.filter((b) => b.o !== 0 && b.o !== o).length;
+    const ag = Math.min(1, base + 0.12 * Math.max(0, pc - ec));
+    this.aiT[o] = 2.8 - 1.7 * ag;
+    const mine = this.bs.filter((b) => b.o === o);
+    for (const b of mine) {
+      const thr = this.sq.filter((s) => s.o !== o && s.to === b).reduce((a, s) => a + s.hp, 0);
+      if (thr > armyPower(b.army) * defOf(b) * 0.8) {
+        const h = this.adj[b.id].map((k) => this.bs[k]).filter((n) => n.o === o && n.tr > 12).sort((p, q) => q.tr - p.tr)[0];
+        if (h) this.sendN(h, b, h.tr * 0.5, this.findRoute(h, b));
+      }
+    }
+    let cmds = 0;
+    for (const b of mine) {
+      if (cmds >= 2) break;
+      if (b.tr < 10) continue;
+      const av = Math.floor(b.tr * (0.45 + 0.35 * ag));
+      const availablePower = this.dispatchPower(b, av);
+      let best = null;
+      let bsc = 1e9;
+      let bn = 0;
+      for (const k of this.adj[b.id]) {
+        const t = this.bs[k];
+        if (t.o === o) continue;
+        const inc = this.sq.filter((s) => s.o === o && s.to === t).reduce((a, s) => a + s.hp, 0);
+        const need = armyPower(t.army) * defOf(t) + 3 - inc;
+        const sc = need - (t.o !== 0 ? ag * 10 : 0) - (t.type === "barracks" ? 4 : 0);
+        if (availablePower > need && sc < bsc) {
+          best = t;
+          bsc = sc;
+          bn = 1;
+          while (bn < av && this.dispatchPower(b, bn) <= need + 3 + ag * 4) bn++;
+        }
+      }
+      if (best) {
+        const route = this.findRoute(b, best);
+        if (route && this.sendN(b, best, Math.max(bn, 1), route)) cmds++;
+      }
+    }
+  }
+  /* ================= به‌روزرسانی ================= */
+  step(dt) {
+    this.t += dt;
+    if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 2.4);
+    for (const s of this.sq) {
+      s.d = Math.min(s.len, s.d + s.sp * dt);
+      const pose = samplePath(s.waypoints, s.d);
+      s.x = pose.x;
+      s.y = pose.y;
+      s.ang = pose.angle;
+    }
+    this.decayTimer += dt;
+    const shouldDecay = this.decayTimer >= 1;
+    if (shouldDecay) {
+      this.decayTimer -= 1;
+      if (this.decayTimer >= 1) this.decayTimer = 0;
+    }
+    for (const b of this.bs) {
+      if (b.fl > 0) b.fl = Math.max(0, b.fl - dt * 1.5);
+      if (b.hit > 0) b.hit = Math.max(0, b.hit - dt * 2.2);
+      if (shouldDecay && b.o && b.tr > this.baseCap) {
+        takeArmy(b.army, 1);
+        if (b.o === 1) {
+          this.fxAdd({ k: "txt", x: b.x - 20, y: b.y - 46, s: "-۱ سرریز", c: "#ff8a80", l: 0.75 });
+        }
+      }
+      if (b.o && b.cap < this.baseCap && b.tr >= b.cap) {
+        b.capTimer += dt;
+        while (b.capTimer >= CFG.capHold && b.cap < this.baseCap && b.tr >= b.cap) {
+          b.capTimer -= CFG.capHold;
+          b.cap = Math.min(this.baseCap, b.cap + CFG.capStep);
+          b.lvl++;
+          b.fl = 1;
+          this.fxAdd({ k: "ring", x: b.x, y: b.y, c: "#e8b44c", l: 0.85 });
+          this.fxAdd({ k: "txt", x: b.x, y: b.y - 72, s: "ظرفیت " + fa(b.cap), c: "#ffe6ab" });
+          if (b.o === 1) {
+            this.onToast("ظرفیت قلعه به " + fa(b.cap) + " نفر افزایش یافت");
+            sfx.upgrade();
+          }
+        }
+        if (b.tr < b.cap || b.cap >= this.baseCap) b.capTimer = 0;
+      } else {
+        b.capTimer = 0;
+      }
+      if (b.type !== "tower") {
+        b.pt += dt;
+        const rate = CFG.spawn[b.type] / (1 + 0.25 * (b.lvl - 1));
+        while (b.pt >= rate) {
+          b.pt -= rate;
+          if (b.tr < b.cap) {
+            addUnit(b.army, producedUnit(b.type));
+            if (b.o === 1 && Math.random() < 0.35)
+              this.fxAdd({ k: "txt", x: b.x + 20, y: b.y - 46, s: "+۱", c: "#bbf7d0", l: 0.7 });
+          }
+        }
+      } else {
+        b.pt = 0;
+      }
+      const armed = b.type === "tower" && (b.o !== 0 || this.neutralDefense);
+      if (armed) {
+        b.tt += dt;
+        if (b.tt >= CFG.shot) {
+          const e = this.sq.find((s) => towerCanTarget(b, s));
+          if (e) {
+            b.tt = 0;
+            const hit = b.o === 0 ? CFG.neutralShotDamage : 1;
+            e.hp = Math.max(0, e.hp - hit);
+            b.fl = Math.max(b.fl, 0.3);
+            this.fxAdd({ k: "ring", x: e.x, y: e.y, c: "#fde047", l: 0.35 });
+            this.fxAdd({ k: "txt", x: e.x, y: e.y - 26, s: "💥", c: "#fde047", l: 0.5 });
+            if (b.o === 0 && e.o === 1) this.onToast("برج خنثی به نیروهایت شلیک کرد!");
+            sfx.shot();
+          }
+        }
+      }
+    }
+    if (this.fieldCombat) {
+      for (let i = 0; i < this.sq.length; i++)
+        for (let j = i + 1; j < this.sq.length; j++) {
+          const a = this.sq[i];
+          const b = this.sq[j];
+          if (a.o !== b.o && a.n > 0 && b.n > 0 && Math.hypot(a.x - b.x, a.y - b.y) < 22) {
+            const m = Math.min(a.hp, b.hp);
+            a.hp = Math.max(0, a.hp - m);
+            b.hp = Math.max(0, b.hp - m);
+            this.fxAdd({ k: "ring", x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, c: "#ffffff", l: 0.4 });
+            this.fxAdd({ k: "burst", x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, c: "#ffd166", l: 0.45 });
+            sfx.clash();
+          }
+        }
+    }
+    const arrived = this.sq.filter((s) => s.n > 0 && s.d >= s.len);
+    this.sq = this.sq.filter((s) => s.n > 0 && s.d < s.len);
+    arrived.forEach((s) => this.arrive(s));
+    if (this.demo) {
+      this.ai(dt, 2);
+      this.ai(dt, 1);
+    } else {
+      for (let owner = 2; owner < this.aiT.length; owner++) {
+        if (this.bs.some((b) => b.o === owner)) this.ai(dt, owner);
+      }
+    }
+    setNatureSound("march", this.sq.some((s) => s.n > 0));
+    this.fx.forEach((f) => f.t += dt);
+    this.fx = this.fx.filter((f) => f.t < f.l);
+    if (this.ghostTrail.length) {
+      this.ghostTrail.forEach((p) => p.t += dt);
+      if (this.ghostTrail[0].t > 0.5) this.ghostTrail = [];
+    }
+    this.sels = this.sels.filter((b) => b.o === 1);
+    this.sel = this.sels[0] || null;
+    if (this.demo) {
+      const pOwn2 = this.bs.some((b) => b.o === 1);
+      const eOwn2 = this.bs.some((b) => b.o > 1);
+      if (!pOwn2 && !this.sq.some((q) => q.o === 1) || !eOwn2 && !this.sq.some((q) => q.o > 1)) this.onDemoReset();
+      return;
+    }
+    const pOwn = this.bs.some((b) => b.o === 1);
+    const eOwn = this.bs.some((b) => b.o > 1);
+    if (!eOwn && !this.sq.some((q) => q.o > 1)) this.finish(true);
+    else if (!pOwn && !this.sq.some((q) => q.o === 1)) this.finish(false);
+  }
+  /** پس از پایان بازی فقط افکت‌ها را پیش می‌برد (کاغذرنگی پیروزی) */
+  idle(dt) {
+    this.t += dt;
+    if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 2.4);
+    this.fx.forEach((f) => f.t += dt);
+    this.fx = this.fx.filter((f) => f.t < f.l);
+  }
+  finish(win) {
+    if (this.over) return;
+    this.over = true;
+    this.cancel();
+    if (win) {
+      sfx.win();
+      for (let k = 0; k < 26; k++)
+        this.fxAdd({
+          k: "burst",
+          x: 80 + Math.random() * Math.max(1, this.worldWidth - 160),
+          y: 80 + Math.random() * Math.max(1, this.worldHeight - 160),
+          c: ["#e8b44c", "#3ddc84", "#ffffff", "#ffd166"][k % 4],
+          l: 0.9 + Math.random() * 0.7
+        });
+    } else sfx.defeat();
+    this.onFinish(win);
+  }
+  /* ================= آمار ================= */
+  count(o) {
+    return this.bs.filter((b) => b.o === o).reduce((a, b) => a + b.tr, 0) + this.sq.filter((s) => s.o === o).reduce((a, s) => a + s.n, 0);
+  }
+  power(o) {
+    return this.bs.filter((b) => b.o === o).reduce((sum, b) => sum + armyPower(b.army), 0) + this.sq.filter((s) => s.o === o).reduce((sum, s) => sum + s.hp, 0);
+  }
+  opponentCount() {
+    return this.bs.filter((b) => b.o > 1).reduce((sum, b) => sum + b.tr, 0) + this.sq.filter((s) => s.o > 1).reduce((sum, s) => sum + s.n, 0);
+  }
+  opponentPower() {
+    return this.bs.filter((b) => b.o > 1).reduce((sum, b) => sum + armyPower(b.army), 0) + this.sq.filter((s) => s.o > 1).reduce((sum, s) => sum + s.hp, 0);
+  }
+  castles(o) {
+    return this.bs.filter((b) => b.o === o).length;
+  }
+  opponentCastles() {
+    return this.bs.filter((b) => b.o > 1).length;
+  }
+};
+
+// src/game/structures.ts
+function banner(c, x, y, color, time, seed) {
+  c.lineWidth = 2;
+  c.strokeStyle = "#5a6965";
+  c.beginPath();
+  c.moveTo(x, y + 3);
+  c.lineTo(x, y - 24);
+  c.stroke();
+  const wave = Math.sin(time * 3.6 + seed) * 2.3;
+  polygon(c, [{ x, y: y - 24 }, { x: x + 18, y: y - 22 + wave }, { x: x + 14, y: y - 16 + wave }, { x: x + 18, y: y - 11 + wave }, { x, y: y - 13 }], color);
+  c.strokeStyle = "rgba(255,255,255,.42)";
+  c.lineWidth = 1;
+  c.beginPath();
+  c.moveTo(x + 1, y - 23);
+  c.lineTo(x + 17, y - 21 + wave);
+  c.stroke();
+}
+function doorway(c, x, y, width, height, trim) {
+  c.fillStyle = trim;
+  c.beginPath();
+  c.roundRect(x - width / 2 - 3, y - height - 3, width + 6, height + 3, [width / 2 + 2, width / 2 + 2, 0, 0]);
+  c.fill();
+  c.fillStyle = "#283f45";
+  c.beginPath();
+  c.roundRect(x - width / 2, y - height, width, height, [width / 2, width / 2, 0, 0]);
+  c.fill();
+  c.strokeStyle = "#687c77";
+  c.lineWidth = 1;
+  for (let i = 1; i < 4; i++) {
+    c.beginPath();
+    c.moveTo(x - width / 2 + width * i / 4, y - height + 5);
+    c.lineTo(x - width / 2 + width * i / 4, y);
+    c.stroke();
+  }
+  c.fillStyle = "#c4cdb7";
+  c.fillRect(x - width / 2 - 2, y, width + 4, 3);
+}
+function slits(c, x, y, width) {
+  c.fillStyle = "#344b4f";
+  c.fillRect(x - width, y, 3, 10);
+  c.fillRect(x + width - 3, y - 2, 3, 10);
+  c.fillStyle = "#eadba4";
+  c.fillRect(x - width, y, 1, 7);
+  c.fillRect(x + width - 3, y - 2, 1, 7);
+}
+function stoneBody(c, x, y, rx, height) {
+  prism(c, ring(x, y, rx + 3, rx * 0.5 + 2), 7, "#879b95", "#bac9b8");
+  const top = prism(c, ring(x, y - 3, rx, rx * 0.53), height, "#bbcbc0", "#e2e3c7");
+  c.strokeStyle = "rgba(79,108,106,.28)";
+  c.lineWidth = 1;
+  for (let z = 13; z < height; z += 14) {
+    c.beginPath();
+    c.moveTo(x - rx * 0.92, y - z);
+    c.lineTo(x, y + rx * 0.48 - z);
+    c.lineTo(x + rx * 0.92, y - z);
+    c.stroke();
+  }
+  return top;
+}
+function battlements(c, x, y, rx, color) {
+  prism(c, ring(x, y, rx, rx * 0.52), 13, color);
+  polygon(c, ring(x, y - 13, rx - 6, (rx - 6) * 0.5), tint(color, -68));
+  const positions = ring(x, y - 13, rx - 3, (rx - 3) * 0.52, 8);
+  positions.sort((a, b) => a.y - b.y);
+  for (const p of positions) prism(c, ring(p.x, p.y, 6, 3.7, 4, Math.PI / 4), 9, color, tint(color, 48));
+}
+function dome(c, x, y, rx, color) {
+  const bottom = ring(x, y, rx, rx * 0.48, 10);
+  const belt = ring(x, y - 17, rx * 0.78, rx * 0.36, 10);
+  const crown = { x: x - 4, y: y - 35 };
+  for (let i = 0; i < bottom.length; i++) {
+    const j = (i + 1) % bottom.length;
+    if (bottom[j].x >= bottom[i].x) continue;
+    polygon(c, [belt[i], belt[j], bottom[j]], tint(color, -8 + i % 3 * 11));
+    polygon(c, [belt[i], bottom[j], bottom[i]], tint(color, -28 + i % 2 * 15));
+  }
+  for (let i = 0; i < belt.length; i++) polygon(c, [belt[i], belt[(i + 1) % belt.length], crown], tint(color, i > 4 ? 35 : i < 2 ? -3 : 18));
+  prism(c, ring(crown.x, crown.y + 1, 6, 3, 6), 4, "#cdd5bc");
+}
+function drawStructure(c, b, time, focused) {
+  const X = b.x, Y = b.y;
+  const color = COL[b.o];
+  c.save();
+  const footprint = ring(X, Y + 8, b.type === "heavy" ? 43 : 36, 18, 8);
+  polygon(c, [{ x: X - 25, y: Y + 6 }, { x: X + 39, y: Y + 2 }, { x: X + 76, y: Y + 38 }, { x: X + 18, y: Y + 37 }], "rgba(12,35,36,.2)");
+  shadow(c, X + 2, Y + 12, 43, 18, 0.16);
+  prism(c, footprint, 5, "#718c82", "#adb99b");
+  if (b.type === "barracks") {
+    stoneBody(c, X, Y + 4, 26, 49);
+    battlements(c, X, Y - 45, 31, color);
+    slits(c, X, Y - 24, 17);
+    for (const side of [-1, 1]) {
+      const x = X + side * 30;
+      stoneBody(c, x, Y + 12, 10, 28);
+      battlements(c, x, Y - 16, 12, color);
+    }
+    doorway(c, X + 2, Y + 19, 14, 23, "#8da49c");
+    banner(c, X - 8, Y - 70, color, time, b.id);
+  } else if (b.type === "speed") {
+    stoneBody(c, X, Y + 5, 25, 37);
+    prism(c, ring(X, Y - 32, 29, 15), 5, color);
+    crystal(c, X, Y - 36, 43, 48, color);
+    for (const side of [-1, 1]) {
+      polygon(c, [
+        { x: X + side * 27, y: Y + 8 },
+        { x: X + side * 32, y: Y - 10 },
+        { x: X + side * 23, y: Y - 36 },
+        { x: X + side * 18, y: Y - 29 },
+        { x: X + side * 23, y: Y - 7 },
+        { x: X + side * 18, y: Y + 10 }
+      ], side === -1 ? "#e5e4cb" : "#8fa8a1");
+    }
+    doorway(c, X, Y + 18, 13, 20, "#92aba3");
+    c.strokeStyle = tint(color, 65);
+    c.lineWidth = 2;
+    c.beginPath();
+    c.moveTo(X - 14, Y - 43);
+    c.lineTo(X - 3, Y - 65);
+    c.stroke();
+  } else if (b.type === "heavy") {
+    for (const side of [-1, 1]) block(c, X + side * 31, Y + 5, 13, 12, 32, "#8fa59b");
+    stoneBody(c, X, Y + 6, 31, 44);
+    prism(c, ring(X, Y - 38, 33, 16.5, 10), 8, color);
+    dome(c, X, Y - 46, 34, color);
+    slits(c, X, Y - 20, 20);
+    for (const side of [-1, 0, 1]) {
+      const x = X + side * 14;
+      polygon(c, [{ x, y: Y - 36 }, { x: x + 4, y: Y - 31 }, { x, y: Y - 25 }, { x: x - 4, y: Y - 31 }], "#e4cf8f");
+    }
+    doorway(c, X, Y + 23, 18, 26, "#8b9d92");
+  } else {
+    prism(c, ring(X, Y + 11, 34, 18), 11, "#72938d", "#afc4b4");
+    prism(c, ring(X, Y - 2, 26, 14), 24, "#bacbbe");
+    prism(c, ring(X, Y - 27, 31, 16), 8, color);
+    for (const side of [-1, 1]) {
+      polygon(c, [{ x: X + side * 24, y: Y - 32 }, { x: X + side * 29, y: Y - 60 }, { x: X + side * 19, y: Y - 51 }, { x: X + side * 16, y: Y - 34 }], side === -1 ? "#dfebd6" : "#8baca4");
+    }
+    const bob = b.o ? Math.sin(time * 2.2 + b.id) * 2 : 0;
+    {
+      const pulse = 0.5 + 0.5 * Math.sin(time * 2.4 + b.id);
+      const radius = 44 + pulse * 9;
+      const glow = c.createRadialGradient(X, Y - 57, 2, X, Y - 57, radius);
+      if (b.o) {
+        glow.addColorStop(0, color + "90");
+        glow.addColorStop(0.22, color + "55");
+        glow.addColorStop(0.6, color + (pulse > 0.5 ? "2c" : "22"));
+        glow.addColorStop(1, color + "00");
+      } else {
+        glow.addColorStop(0, "#b7cdca55");
+        glow.addColorStop(0.4, "#b7cdca22");
+        glow.addColorStop(1, "#b7cdca00");
+      }
+      c.save();
+      c.globalCompositeOperation = "lighter";
+      c.fillStyle = glow;
+      c.beginPath();
+      c.arc(X, Y - 57, radius, 0, Math.PI * 2);
+      c.fill();
+      if (b.o) {
+        c.strokeStyle = color + (pulse > 0.5 ? "4d" : "33");
+        c.lineWidth = 1.8;
+        c.beginPath();
+        c.arc(X, Y - 57, 34 + pulse * 5, 0, Math.PI * 2);
+        c.stroke();
+      }
+      c.restore();
+    }
+    crystal(c, X, Y - 38 + bob, 28, 53, b.o ? color : "#9db9b8");
+    doorway(c, X, Y + 12, 10, 15, "#83a29a");
+    if (b.o && focused) {
+      c.strokeStyle = color + "90";
+      c.lineWidth = 1.5;
+      c.beginPath();
+      c.ellipse(X, Y + 9, 45 + Math.sin(time * 2) * 2, 22, 0, 0, Math.PI * 2);
+      c.stroke();
+    }
+  }
+  c.restore();
+}
+function troopPosition(s, index, count) {
+  const path = s.waypoints.length > 1 ? s.waypoints : s.route;
+  const narrow = s.waypoints.some((point) => (point.laneWidth ?? TROOP_LANE_SPACING) < TROOP_LANE_SPACING);
+  const columns = narrow ? 1 : Math.min(3, Math.ceil(Math.sqrt(count)));
+  const row = Math.floor(index / columns);
+  const lane = index % columns - (Math.min(columns, count - row * columns) - 1) / 2;
+  const travelled = Math.max(0, s.d - row * 13 - 3);
+  const pose = samplePath(path, travelled);
+  const offset = lane * pose.laneWidth * Math.min(1, travelled / 30);
+  return {
+    ...pose,
+    x: pose.x - Math.sin(pose.angle) * offset,
+    y: pose.y + Math.cos(pose.angle) * offset
+  };
+}
+
+// src/game/render.ts
+var F_BODY = "'Vazirmatn',Tahoma,sans-serif";
+function rr(c, a, b, w, h, r) {
+  c.beginPath();
+  if (c.roundRect) c.roundRect(a, b, w, h, r);
+  else c.rect(a, b, w, h);
+}
+function drawB(c, g, b, T) {
+  const X = b.x;
+  const Y = b.y;
+  const isSel = g.sels.includes(b);
+  const isDraft = !!g.ptr && g.ptr.draft.includes(b);
+  const isTarget = g.preview?.target === b;
+  if (isSel || isDraft || g.hover === b) {
+    const color = isSel || isDraft ? "#d8ffe8" : "#e2e4ce";
+    c.fillStyle = "rgba(201,255,217,.10)";
+    c.strokeStyle = color;
+    c.lineWidth = isSel || isDraft ? 2.7 : 1.2;
+    c.beginPath();
+    c.ellipse(X, Y + 10, 48, 24, 0, 0, Math.PI * 2);
+    c.fill();
+    c.stroke();
+    c.strokeStyle = color + "55";
+    c.lineWidth = 1;
+    c.beginPath();
+    c.ellipse(X, Y + 10, 55 + Math.sin(T * 3) * 2, 28, 0, 0, Math.PI * 2);
+    c.stroke();
+  }
+  drawStructure(c, b, T, isSel || isDraft || g.hover === b);
+  if (b.hit > 0) {
+    c.strokeStyle = `rgba(255,90,80,${b.hit * 0.9})`;
+    c.lineWidth = 5;
+    c.beginPath();
+    c.arc(X, Y, 46 + (1 - b.hit) * 16, 0, 7);
+    c.stroke();
+  }
+  if (b.fl > 0) {
+    c.fillStyle = `rgba(255,255,255,${b.fl * 0.65})`;
+    c.beginPath();
+    c.arc(X, Y, 50, 0, 7);
+    c.fill();
+  }
+  if (isTarget && g.preview?.sources.length) drawTargetMark(c, g.preview, T, dashAlpha(g));
+}
+function drawBuildingLabel(c, g, b) {
+  const X = b.x, Y = b.y;
+  const col = COL[b.o], dk = DK[b.o];
+  const isSel = g.sels.includes(b);
+  const excess = b.o && b.tr > g.baseCap;
+  const badgeColor = excess ? "#ac3943" : b.o ? dk : "#567577";
+  c.fillStyle = "rgba(4,25,30,.3)";
+  rr(c, X - 25 + 3, Y + 33, 50, 31, 5);
+  c.fill();
+  c.fillStyle = "#cfdbc4";
+  rr(c, X - 26, Y + 28, 52, 32, 5);
+  c.fill();
+  c.fillStyle = badgeColor;
+  rr(c, X - 23, Y + 30, 46, 27, 3);
+  c.fill();
+  c.font = "900 19px " + F_BODY;
+  c.textAlign = "center";
+  c.textBaseline = "middle";
+  c.lineWidth = 2.5;
+  c.strokeStyle = "#153739";
+  c.strokeText(fa(b.tr), X, Y + 44);
+  c.fillStyle = "#f5f7e8";
+  c.fillText(fa(b.tr), X, Y + 44);
+  c.fillStyle = "#d1dbc1";
+  rr(c, X - 28, Y + 22, 56, 8, 3);
+  c.fill();
+  c.fillStyle = "#193735";
+  rr(c, X - 26, Y + 24, 52, 4, 1);
+  c.fill();
+  c.fillStyle = excess ? "#f7a281" : col;
+  c.fillRect(X - 26, Y + 24, 52 * Math.min(1, b.tr / b.cap), 4);
+  if (isSel || g.hover === b) {
+    c.font = "bold 10px " + F_BODY;
+    c.textAlign = "center";
+    c.fillStyle = "#e9ecd3";
+    c.strokeStyle = "#223d39";
+    c.lineWidth = 3;
+    const name = BUILDING_LABELS[b.type] + " / " + fa(b.cap);
+    c.strokeText(name, X, Y + 72);
+    c.fillText(name, X, Y + 72);
+    if (isSel) {
+      const composition = TROOP_TYPES.filter((type) => b.army[type] > 0).map((type) => UNITS[type].label + " " + fa(unitCount(b.army[type], type))).join(" / ");
+      c.font = "9px " + F_BODY;
+      c.strokeText(composition, X, Y + 86);
+      c.fillText(composition, X, Y + 86);
+    }
+  }
+}
+function drawTargetMark(c, pv, T, alpha = 1) {
+  const t = pv.target;
+  const attack = pv.mode === "attack";
+  const col = attack ? "#ff6b5f" : "#5ee39a";
+  const pulse = 1 + Math.sin(T * 8) * 0.06;
+  const ring2 = withAlpha(col, alpha);
+  c.save();
+  c.translate(t.x, t.y);
+  c.scale(pulse, pulse);
+  c.strokeStyle = ring2;
+  c.lineWidth = 4;
+  c.setLineDash([16, 10]);
+  c.lineDashOffset = T * 40;
+  c.beginPath();
+  c.arc(0, 0, 62, 0, 7);
+  c.stroke();
+  c.setLineDash([]);
+  c.lineWidth = 3;
+  for (let k = 0; k < 4; k++) {
+    const a = k * Math.PI / 2 + Math.PI / 4;
+    c.beginPath();
+    c.moveTo(Math.cos(a) * 68, Math.sin(a) * 68);
+    c.lineTo(Math.cos(a) * 80, Math.sin(a) * 80);
+    c.stroke();
+  }
+  c.restore();
+  if (attack || pv.mode === "reinforce") {
+    const txt1 = "اعزام " + fa(pv.total) + " نفر";
+    const txt2 = attack ? "توان " + fa(Math.round(pv.power * 10) / 10) + " / دفاع " + fa(Math.round(pv.need * 10) / 10) : "توان " + fa(Math.round(pv.power * 10) / 10) + " / دوبار کلیک";
+    c.font = "900 15px " + F_BODY;
+    const w = Math.max(c.measureText(txt1).width, c.measureText(txt2).width) + 46;
+    const bx = t.x - w / 2;
+    const by = t.y - 128;
+    c.fillStyle = "rgba(4,18,25,.9)";
+    rr(c, bx, by, w, 42, 10);
+    c.fill();
+    c.strokeStyle = pv.ok || pv.mode === "reinforce" ? "#5ee39a" : "#ff8a7a";
+    c.lineWidth = 2;
+    rr(c, bx, by, w, 42, 10);
+    c.stroke();
+    c.textAlign = "right";
+    c.textBaseline = "middle";
+    c.fillStyle = "#fff";
+    c.fillText(txt1, bx + w - 34, by + 13);
+    c.fillStyle = "rgba(255,255,255,.62)";
+    c.font = "12px " + F_BODY;
+    c.fillText(txt2, bx + w - 34, by + 30);
+    c.font = "18px " + F_BODY;
+    c.textAlign = "center";
+    const good = pv.mode === "reinforce" ? pv.total > 0 : pv.ok;
+    c.fillStyle = good ? "#5ee39a" : "#ff8a7a";
+    c.fillText(pv.blocked ? "⚠" : good ? "✓" : "✕", bx + 18, by + 21);
+    if (pv.blocked) {
+      c.font = "10px " + F_BODY;
+      c.fillStyle = "#ffd166";
+      c.textAlign = "center";
+      c.fillText(fa(pv.blocked) + " مسیر بسته", t.x, by + 52);
+    }
+  }
+}
+function drawTrooper(c, s, X, Y, T, seed, angle) {
+  const heavy = s.unit === "heavy";
+  const fast = s.unit === "fast";
+  const pace = UNITS[s.unit].speed;
+  const bob = Math.sin(T * 12 * pace + seed) * (heavy ? 0.8 : 1.4);
+  const col = COL[s.o];
+  const dir = Math.cos(angle) < 0 ? -1 : 1;
+  const heightScale = heavy ? 0.85 : 0.72;
+  c.fillStyle = "rgba(4,29,33,.25)";
+  c.beginPath();
+  c.ellipse(X + 1, Y, heavy ? 6 : 5, 2.4, 0, 0, Math.PI * 2);
+  c.fill();
+  c.save();
+  c.translate(X, Y - 12 * heightScale);
+  c.scale(dir * (heavy ? 0.82 : 0.67), heightScale);
+  const step = Math.sin(T * 13 * pace + seed) * 2.5;
+  c.strokeStyle = "#35494d";
+  c.lineWidth = 3;
+  c.beginPath();
+  c.moveTo(-3, 4 + bob);
+  c.lineTo(-3 + step, 12);
+  c.moveTo(3, 4 + bob);
+  c.lineTo(3 - step, 12);
+  c.stroke();
+  polygon(c, [{ x: -8, y: -7 + bob }, { x: 5, y: -9 + bob }, { x: 9, y: 5 + bob }, { x: 1, y: 10 + bob }, { x: -8, y: 5 + bob }], col);
+  polygon(c, [{ x: 2, y: -8 + bob }, { x: 7, y: -5 + bob }, { x: 9, y: 5 + bob }, { x: 1, y: 10 + bob }], tint(col, -40));
+  c.fillStyle = "#efd5a4";
+  c.fillRect(-5, -16 + bob, 10, 9);
+  polygon(c, ring(0, -18 + bob, 9, 6, 6), tint(col, 28));
+  polygon(c, [{ x: -8, y: -18 + bob }, { x: 0, y: -14 + bob }, { x: 8, y: -18 + bob }, { x: 7, y: -11 + bob }, { x: -7, y: -11 + bob }], tint(col, -20));
+  c.fillStyle = "#294044";
+  c.fillRect(1, -11 + bob, 5, 1.5);
+  c.strokeStyle = "#a3afa1";
+  c.lineWidth = 1.5;
+  c.beginPath();
+  c.moveTo(11, 10);
+  c.lineTo(11, -28 + bob);
+  c.stroke();
+  polygon(c, [{ x: 8, y: -25 + bob }, { x: 11, y: -33 + bob }, { x: 14, y: -25 + bob }], "#dce4ce");
+  if (heavy) {
+    polygon(c, [{ x: -12, y: -7 + bob }, { x: -1, y: -7 + bob }, { x: -1, y: 6 + bob }, { x: -7, y: 11 + bob }, { x: -13, y: 5 + bob }], "#bdcbb7", "#506b69");
+    polygon(c, [{ x: -11, y: -4 + bob }, { x: -4, y: -4 + bob }, { x: -4, y: 4 + bob }, { x: -7, y: 7 + bob }, { x: -11, y: 3 + bob }], col);
+    c.fillStyle = "#b1c1b1";
+    c.fillRect(-1, -24 + bob, 3, 14);
+  } else if (fast) {
+    polygon(c, [{ x: -5, y: -21 + bob }, { x: -13, y: -30 + bob }, { x: -8, y: -17 + bob }], "#e0f4e6");
+  }
+  c.restore();
+}
+function arrows(c, g, T) {
+  const pv = g.preview;
+  if (!pv || !pv.sources.length && pv.mode === "select") return;
+  const t = pv.target;
+  const col = pv.mode === "attack" ? "#ff7a63" : "#63e7a4";
+  for (const s of pv.sources) {
+    const route = g.findRoute(s, t);
+    if (!route) continue;
+    const points = buildMarchPath(route, landscapeFor(g).islands, g.bs);
+    const a = dashAlpha(g);
+    c.strokeStyle = `rgba(4,18,25,${0.35 * a})`;
+    c.lineWidth = 5;
+    c.beginPath();
+    points.forEach((point, i) => i ? c.lineTo(point.x, point.y) : c.moveTo(point.x, point.y));
+    c.stroke();
+    c.strokeStyle = withAlpha(col, a);
+    c.lineWidth = 2.5;
+    c.setLineDash([13, 9]);
+    c.lineDashOffset = -T * 46;
+    c.beginPath();
+    points.forEach((point, i) => i ? c.lineTo(point.x, point.y) : c.moveTo(point.x, point.y));
+    c.stroke();
+    c.setLineDash([]);
+    const n = g.amountOf(s);
+    const marker = samplePath(points, Math.min(90, pathLength(points) * 0.25));
+    c.font = "900 13px " + F_BODY;
+    c.textAlign = "center";
+    c.textBaseline = "middle";
+    c.fillStyle = "rgba(4,18,25,.85)";
+    rr(c, marker.x - 16, marker.y - 27, 32, 20, 8);
+    c.fill();
+    c.fillStyle = col;
+    c.fillText(fa(n), marker.x, marker.y - 16);
+  }
+  if (pv.sources.length) {
+    const s = pv.sources[0];
+    const route = g.findRoute(s, t);
+    if (!route) return;
+    const points = buildMarchPath(route, landscapeFor(g).islands, g.bs);
+    const head = samplePath(points, Math.max(0, pathLength(points) - 58));
+    c.save();
+    c.translate(head.x, head.y);
+    c.rotate(head.angle);
+    c.fillStyle = col;
+    c.beginPath();
+    c.moveTo(14, 0);
+    c.lineTo(-8, 9);
+    c.lineTo(-8, -9);
+    c.closePath();
+    c.fill();
+    c.restore();
+  }
+}
+function withAlpha(hex, a) {
+  const h = hex.replace("#", "");
+  const n = parseInt(h.length === 3 ? h.split("").map((x) => x + x).join("") : h, 16);
+  return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${Math.max(0, Math.min(1, a))})`;
+}
+var dashAlpha = (g) => {
+  const a = Number(g.attackDash);
+  return Number.isFinite(a) ? Math.max(0, Math.min(1, a)) : 1;
+};
+function strokePath(c, pts, width, color, dashOff = 0) {
+  if (pts.length < 2) return;
+  c.lineJoin = "round";
+  c.lineCap = "round";
+  c.strokeStyle = color;
+  c.lineWidth = width;
+  c.beginPath();
+  c.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i++) c.lineTo(pts[i].x, pts[i].y);
+  if (dashOff) {
+    c.setLineDash([3, 10]);
+    c.lineDashOffset = dashOff;
+    c.stroke();
+    c.setLineDash([]);
+  } else c.stroke();
+}
+function trail(c, g, T) {
+  const p = g.ptr;
+  if (p && p.moved && p.trail.length > 1) {
+    strokePath(c, p.trail, 16, "rgba(61,220,132,.12)");
+    strokePath(c, p.trail, 8, "rgba(61,220,132,.28)");
+    strokePath(c, p.trail, 3, "rgba(232,180,76,.95)", -T * 60);
+    const tip = p.trail[p.trail.length - 1];
+    c.fillStyle = "rgba(255,255,255,.9)";
+    c.beginPath();
+    c.arc(tip.x, tip.y, 6 + Math.sin(T * 16) * 1.5, 0, 7);
+    c.fill();
+    c.strokeStyle = "#e8b44c";
+    c.lineWidth = 2;
+    c.beginPath();
+    c.arc(tip.x, tip.y, 10 + Math.sin(T * 16) * 1.5, 0, 7);
+    c.stroke();
+    const n = p.draft.length;
+    if (n) {
+      const txt = fa(n) + " قلعه انتخاب شد";
+      c.font = "900 14px " + F_BODY;
+      const tw = c.measureText(txt).width + 18;
+      const bx = tip.x - tw / 2;
+      const by = tip.y - 34;
+      c.fillStyle = "rgba(4,18,25,.9)";
+      rr(c, bx, by, tw, 22, 8);
+      c.fill();
+      c.strokeStyle = "rgba(61,220,132,.7)";
+      c.lineWidth = 1.5;
+      rr(c, bx, by, tw, 22, 8);
+      c.stroke();
+      c.fillStyle = "#9ff5c4";
+      c.textAlign = "center";
+      c.textBaseline = "middle";
+      c.fillText(txt, tip.x, by + 11);
+    }
+    return;
+  }
+  if (g.ghostTrail.length > 1) {
+    const fade = 1 - g.ghostTrail[0].t / 0.5;
+    c.globalAlpha = Math.max(0, fade);
+    strokePath(c, g.ghostTrail, 8, "rgba(61,220,132,.4)");
+    c.globalAlpha = 1;
+  }
+}
+function fitView(g, W, H) {
+  const top = g.demo ? 0 : Math.max(0, Math.min(H * 0.26, g.hudInset || 0));
+  const areaH = Math.max(140, H - top);
+  const pad = g.demo ? 1.02 : 0.94;
+  const s = Math.min(W / g.worldWidth, areaH / g.worldHeight) * pad * g.zoom;
+  return {
+    s,
+    ox: (W - g.worldWidth * s) / 2,
+    oy: top + (areaH - g.worldHeight * s) / 2,
+    maxPanX: Math.max(0, (g.worldWidth * s - W) / 2),
+    maxPanY: Math.max(0, (g.worldHeight * s - areaH) / 2),
+    areaH
+  };
+}
+function render(c, g, T, W, H, dpr) {
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.clearRect(0, 0, W, H);
+  drawWater(c, g, W, H, T);
+  if (!g) return;
+  const view = fitView(g, W, H);
+  const s = view.s;
+  g.panX = Math.max(-view.maxPanX, Math.min(view.maxPanX, g.panX));
+  g.panY = Math.max(-view.maxPanY, Math.min(view.maxPanY, g.panY));
+  const finalOx = view.ox + g.panX;
+  const finalOy = view.oy + g.panY;
+  g.view = { s, ox: finalOx, oy: finalOy };
+  const sh = g.shake * 7;
+  const shx = sh ? (Math.random() - 0.5) * sh : 0;
+  const shy = sh ? (Math.random() - 0.5) * sh : 0;
+  c.setTransform(dpr * s, 0, 0, dpr * s, dpr * (finalOx + shx), dpr * (finalOy + shy));
+  drawTerrain(c, g, T);
+  drawTowerRanges(c, g, T);
+  arrows(c, g, T);
+  const drawables = [
+    ...landscapeFor(g).scenery.map((item) => ({ y: item.y, draw: () => drawScenery(c, item, T) })),
+    ...g.bs.map((b) => ({ y: b.y + 12, draw: () => drawB(c, g, b, T) })),
+    ...g.sq.flatMap((squad) => Array.from({ length: squad.n }, (_, index) => {
+      const p = troopPosition(squad, index, squad.n);
+      return { y: p.y, draw: () => drawTrooper(c, squad, p.x, p.y, T, squad.id + index * 0.6, p.angle) };
+    }))
+  ];
+  drawables.sort((a, b) => a.y - b.y).forEach((item) => item.draw());
+  for (const f of g.fx) {
+    const p = f.t / f.l;
+    c.globalAlpha = Math.max(0, 1 - p);
+    if (f.k === "txt") {
+      c.font = "900 22px " + F_BODY;
+      c.textAlign = "center";
+      c.textBaseline = "middle";
+      c.lineWidth = 4;
+      c.strokeStyle = "rgba(0,0,0,.55)";
+      c.strokeText(f.s || "", f.x, f.y - p * 36);
+      c.fillStyle = f.c;
+      c.fillText(f.s || "", f.x, f.y - p * 36);
+    } else if (f.k === "burst") {
+      const R = (f.r || 40) * (0.3 + p);
+      c.strokeStyle = f.c;
+      c.lineWidth = 4 * (1 - p) + 1;
+      for (let k = 0; k < 8; k++) {
+        const a = k / 8 * Math.PI * 2 + p * 1.4;
+        c.beginPath();
+        c.moveTo(f.x + Math.cos(a) * R * 0.35, f.y + Math.sin(a) * R * 0.35);
+        c.lineTo(f.x + Math.cos(a) * R, f.y + Math.sin(a) * R);
+        c.stroke();
+      }
+    } else {
+      c.strokeStyle = f.c;
+      c.lineWidth = 6 * (1 - p) + 1;
+      c.beginPath();
+      c.arc(f.x, f.y, 12 + p * (f.r || 62), 0, 7);
+      c.stroke();
+    }
+    c.globalAlpha = 1;
+  }
+  for (const b of g.bs) drawBuildingLabel(c, g, b);
+  trail(c, g, T);
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+// scripts/blazor-battle.ts
+var sessions = /* @__PURE__ */ new WeakMap();
+var globalKey = "castle_blazor9_settings_v2";
+var mapKey = "castle_blazor9_map_v1";
+var legacyKey = "castle_blazor9_settings_v1";
+var defaultSettings = {
+  unlockedLevel: 1,
+  completedLevels: [],
+  soundEnabled: true,
+  speedMultiplier: 1,
+  battleMode: 0,
+  maxTroopsCap: 50,
+  customMap: DEFAULT_RANDOM_MAP,
+  openRoads: true,
+  minCastleDistance: 30,
+  ambientSound: true,
+  marchSound: true
+};
+function normalize(input) {
+  const settings = { ...defaultSettings, ...input };
+  const cap = Number(settings.maxTroopsCap);
+  settings.maxTroopsCap = Number.isFinite(cap) ? Math.max(1, Math.min(1e3, Math.floor(cap))) : 50;
+  settings.speedMultiplier = [1, 2, 3].includes(Number(settings.speedMultiplier)) ? Number(settings.speedMultiplier) : 1;
+  settings.unlockedLevel = Math.max(1, Math.min(30, Math.floor(Number(settings.unlockedLevel) || 1)));
+  settings.battleMode = Number(settings.battleMode) === 1 ? 1 : 0;
+  settings.completedLevels = Array.isArray(settings.completedLevels) ? [...new Set(settings.completedLevels.filter((i) => Number.isInteger(i) && i >= 0 && i < 30))] : [];
+  settings.soundEnabled = settings.soundEnabled !== false;
+  settings.customMap = normalizeRandomMap(settings.customMap);
+  settings.openRoads = settings.openRoads === true;
+  const dist = Number(settings.minCastleDistance);
+  settings.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 30;
+  settings.ambientSound = settings.ambientSound !== false;
+  settings.marchSound = settings.marchSound !== false;
+  const t = settings.troopTuning ?? {};
+  settings.troopTuning = normalizeUnitTuning({
+    normal: { power: t.normalPower, speed: t.normalSpeed },
+    fast: { power: t.fastPower, speed: t.fastSpeed },
+    heavy: { power: t.heavyPower, speed: t.heavySpeed }
+  });
+  settings.haloSpin = normalizeHaloSpin(settings.haloSpin);
+  settings.attackDash = normalizeAttackDash(settings.attackDash);
+  const vols = settings.volumes && typeof settings.volumes === "object" ? settings.volumes : {};
+  settings.volumes = Object.fromEntries(
+    Object.entries(vols).filter(([k, v]) => typeof k === "string" && Number.isFinite(Number(v))).map(([k, v]) => [k, Math.max(0, Math.min(1, Number(v)))])
+  );
+  return settings;
+}
+function globalSlice(input) {
+  const { customMap, ...rest } = normalize(input);
+  void customMap;
+  return rest;
+}
+function loadSettings() {
+  try {
+    const gRaw = localStorage.getItem(globalKey);
+    const mRaw = localStorage.getItem(mapKey);
+    const legacyRaw = gRaw || mRaw ? null : localStorage.getItem(legacyKey);
+    const base = gRaw ? JSON.parse(gRaw) : legacyRaw ? JSON.parse(legacyRaw) : null;
+    const map = mRaw ? JSON.parse(mRaw) : legacyRaw ? JSON.parse(legacyRaw)?.customMap : null;
+    if (!base && !map) return null;
+    if (legacyRaw) {
+      const migrated = normalize({ ...JSON.parse(legacyRaw) });
+      localStorage.setItem(globalKey, JSON.stringify(globalSlice(migrated)));
+      localStorage.setItem(mapKey, JSON.stringify(migrated.customMap));
+      return migrated;
+    }
+    return normalize({ ...base ?? {}, customMap: map ?? void 0 });
+  } catch {
+    return null;
+  }
+}
+function saveGlobalSettings(input) {
+  try {
+    localStorage.setItem(globalKey, JSON.stringify(globalSlice(input)));
+  } catch {
+  }
+}
+function saveMapSettings(map) {
+  try {
+    localStorage.setItem(mapKey, JSON.stringify(normalizeRandomMap(map)));
+  } catch {
+  }
+}
+function saveSettings(input) {
+  const value = normalize(input);
+  saveGlobalSettings(value);
+  saveMapSettings(value.customMap);
+}
+function snapshot(s) {
+  const g = s.game;
+  const selected = g.ptr?.draft.length ? g.ptr.draft : g.sels;
+  return {
+    levelIndex: g.i,
+    levelName: g.L.name,
+    isCustom: g.i >= LEVELS.length,
+    largeMap: g.largeMap,
+    zoom: g.zoom,
+    // بازیکنی که همهٔ قلعه‌هایش را از دست داده از کادر توان رزمی حذف می‌شود.
+    factions: g.participants.map((owner) => ({
+      id: owner,
+      name: owner === 1 ? "تو" : `بازیکن ${owner.toLocaleString("fa-IR")}`,
+      troops: g.count(owner),
+      power: g.power(owner),
+      castles: g.castles(owner),
+      color: COL[owner]
+    })).filter((faction) => faction.castles > 0),
+    playerTroops: g.count(1),
+    enemyTroops: g.opponentCount(),
+    playerPower: g.power(1),
+    enemyPower: g.opponentPower(),
+    playerCastles: g.castles(1),
+    enemyCastles: g.opponentCastles(),
+    selectedCount: selected.length,
+    selectedTroops: selected.reduce((n, b) => n + g.amountOf(b), 0),
+    readyTroops: selected.reduce((n, b) => n + g.amountOf(b), 0),
+    readyPower: selected.reduce((sum, b) => sum + g.dispatchPower(b), 0),
+    percent: g.pct,
+    timeSeconds: g.t,
+    isPaused: g.paused,
+    isOver: g.over,
+    win: s.win,
+    message: performance.now() < s.messageUntil ? s.message : ""
+  };
+}
+function notify(s, now, force = false) {
+  if (s.stopped || s.game.demo || s.inFlight || !force && now - s.lastSent < 500) return;
+  s.inFlight = true;
+  s.lastSent = now;
+  s.callback.invokeMethodAsync("OnGameState", snapshot(s)).catch(() => {
+    if (!s.stopped) {
+      s.game.paused = true;
+      s.game.cancel();
+    }
+  }).finally(() => {
+    s.inFlight = false;
+  });
+}
+function readHudInset(canvas) {
+  const bar = canvas.parentElement?.querySelector(".cg-hud-top");
+  return bar ? bar.getBoundingClientRect().height : 44;
+}
+function applyRules(s) {
+  const g = s.game;
+  g.fieldCombat = s.settings.battleMode === 0;
+  g.setMaxTroops(s.settings.maxTroopsCap);
+  g.setRoadRules({
+    openRoads: s.settings.openRoads,
+    minRoadLength: s.settings.minCastleDistance * PX_PER_METER,
+    randomRoads: s.settings.customMap.randomRoads
+  });
+  applyUnitTuning(s.settings.troopTuning);
+  g.haloSpin = normalizeHaloSpin(s.settings.haloSpin);
+  g.attackDash = normalizeAttackDash(s.settings.attackDash);
+  g.hudInset = readHudInset(s.canvas);
+  setSfxVolumes(s.settings.volumes);
+  setSound(!g.demo && s.settings.soundEnabled);
+  setNatureLayers(!g.demo && s.settings.ambientSound, !g.demo && s.settings.marchSound);
+}
+function newGame(s, index, demo, levelOverride) {
+  const percent = s.game?.pct ?? 60;
+  applyUnitTuning(s.settings.troopTuning);
+  s.game = new Game(index, demo, levelOverride);
+  s.game.pct = percent;
+  s.win = null;
+  s.message = "";
+  s.messageUntil = 0;
+  s.resetDemo = false;
+  applyRules(s);
+  s.game.onToast = (message) => {
+    if (s.game.demo) return;
+    s.message = message;
+    s.messageUntil = performance.now() + 2400;
+  };
+  s.game.onFinish = (win) => {
+    s.win = win;
+    notify(s, performance.now(), true);
+  };
+  s.game.onDemoReset = () => {
+    s.resetDemo = true;
+  };
+}
+function initialize(canvas, callback, input) {
+  dispose(canvas);
+  const ctx2 = canvas.getContext("2d");
+  if (!ctx2) throw new Error("Canvas 2D is not available in this browser.");
+  const s = {
+    game: new Game(0, true),
+    canvas,
+    settings: normalize(input),
+    callback,
+    win: null,
+    message: "",
+    messageUntil: 0,
+    inFlight: false,
+    lastSent: 0,
+    raf: 0,
+    stopped: false,
+    resetDemo: false,
+    abort: new AbortController(),
+    resizeObserver: null,
+    detachObserver: null
+  };
+  sessions.set(canvas, s);
+  newGame(s, 3, true);
+  const signal = s.abort.signal;
+  let pan = null;
+  function resize() {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    canvas.width = Math.max(1, Math.round(canvas.clientWidth * dpr));
+    canvas.height = Math.max(1, Math.round(canvas.clientHeight * dpr));
+  }
+  function point(event) {
+    const bounds = canvas.getBoundingClientRect();
+    const { ox, oy, s: scale } = s.game.view;
+    return { x: (event.clientX - bounds.left - ox) / scale, y: (event.clientY - bounds.top - oy) / scale };
+  }
+  function clampPan() {
+    s.game.clampPan(canvas.clientWidth, canvas.clientHeight);
+  }
+  const canPlay = () => !s.game.demo && !s.game.over && !s.game.paused && !s.stopped;
+  canvas.addEventListener("pointerdown", (event) => {
+    if (!canPlay() || s.game.ptr) return;
+    const explicitPan = event.button === 1 || event.button === 2;
+    if (event.pointerType === "mouse" && event.button !== 0 && !explicitPan) return;
+    event.preventDefault();
+    canvas.focus({ preventScroll: true });
+    try {
+      canvas.setPointerCapture(event.pointerId);
+    } catch {
+    }
+    const p = point(event);
+    if (explicitPan || !s.game.buildingAt(p.x, p.y)) {
+      pan = { id: event.pointerId, x: event.clientX, y: event.clientY, sx: event.clientX, sy: event.clientY };
+      canvas.style.cursor = "grabbing";
+      return;
+    }
+    s.game.down(event.pointerId, p.x, p.y, event.shiftKey);
+  }, { signal });
+  canvas.addEventListener("pointermove", (event) => {
+    if (!canPlay()) return;
+    if (pan?.id === event.pointerId) {
+      s.game.panBy(event.clientX - pan.x, event.clientY - pan.y);
+      pan.x = event.clientX;
+      pan.y = event.clientY;
+      clampPan();
+      return;
+    }
+    const points = event.getCoalescedEvents?.() ?? [];
+    for (const sample of points.length ? points : [event]) {
+      const p = point(sample);
+      s.game.move(event.pointerId, p.x, p.y);
+    }
+    canvas.style.cursor = s.game.ptr ? "grabbing" : s.game.hover ? "pointer" : "grab";
+  }, { signal });
+  canvas.addEventListener("pointerup", (event) => {
+    if (pan?.id === event.pointerId) {
+      const start = pan;
+      pan = null;
+      const p2 = point(event);
+      if (Math.hypot(event.clientX - start.sx, event.clientY - start.sy) < 6 && !s.game.buildingAt(p2.x, p2.y)) s.game.deselectAll();
+      canvas.style.cursor = s.game.buildingAt(p2.x, p2.y) ? "pointer" : "grab";
+      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+      return;
+    }
+    if (!canPlay() || !s.game.ptr) return;
+    const p = point(event);
+    s.game.move(event.pointerId, p.x, p.y);
+    s.game.up(event.pointerId, p.x, p.y);
+    if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+  }, { signal });
+  canvas.addEventListener("pointercancel", () => {
+    pan = null;
+    s.game.cancel();
+  }, { signal });
+  canvas.addEventListener("lostpointercapture", () => {
+    pan = null;
+    s.game.cancel();
+  }, { signal });
+  canvas.addEventListener("wheel", (event) => {
+    if (!canPlay()) return;
+    event.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const step = event.deltaY > 0 ? -0.12 : 0.12;
+    s.game.zoomAt(step, event.clientX - rect.left, event.clientY - rect.top, canvas.clientWidth, canvas.clientHeight);
+    notify(s, performance.now(), true);
+  }, { signal, passive: false });
+  canvas.addEventListener("contextmenu", (event) => event.preventDefault(), { signal });
+  canvas.addEventListener("keydown", (event) => {
+    if (s.game.demo || s.game.over) return;
+    if (event.code === "Space" || event.code === "Escape") {
+      event.preventDefault();
+      s.game.cancel();
+      s.game.paused = !s.game.paused;
+      notify(s, performance.now(), true);
+    } else if (!s.game.paused) {
+      if (event.code === "KeyA") {
+        event.preventDefault();
+        s.game.selectAll();
+      } else if (/^Digit[1-3]$/.test(event.code)) s.game.pct = [20, 60, 80][Number(event.code.slice(-1)) - 1];
+    }
+  }, { signal });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden && !s.game.demo && !s.game.over) {
+      s.game.paused = true;
+      s.game.cancel();
+      notify(s, performance.now(), true);
+    }
+  }, { signal });
+  window.addEventListener("resize", resize, { signal });
+  s.resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(resize) : null;
+  s.resizeObserver?.observe(canvas);
+  s.detachObserver = new MutationObserver(() => {
+    if (!canvas.isConnected) dispose(canvas);
+  });
+  s.detachObserver.observe(document.body, { childList: true, subtree: true });
+  resize();
+  let last = 0;
+  function frame(now) {
+    if (s.stopped) return;
+    const dt = Math.max(0, Math.min(0.05, last ? (now - last) / 1e3 : 0));
+    last = now;
+    const g = s.game;
+    if (!g.paused && !g.over) g.step(dt * s.settings.speedMultiplier);
+    else if (g.over) g.idle(dt * s.settings.speedMultiplier);
+    if (g.ptr || g.hover) g.preview = g.computePreview();
+    render(ctx2, g, now / 1e3, canvas.clientWidth, canvas.clientHeight, Math.min(2, devicePixelRatio || 1));
+    notify(s, now);
+    if (s.resetDemo) newGame(s, Math.floor(Math.random() * LEVELS.length), true);
+    s.raf = requestAnimationFrame(frame);
+  }
+  s.raf = requestAnimationFrame(frame);
+  return snapshot(s);
+}
+function command(canvas, action, value = 0) {
+  const s = sessions.get(canvas);
+  if (!s || s.stopped) throw new Error("The game is not initialized.");
+  const g = s.game;
+  if (action === "randomMap") {
+    const config = normalizeRandomMap(value);
+    const error = validateRandomMap(config);
+    if (error) {
+      s.message = error;
+      s.messageUntil = performance.now() + 3500;
+      return snapshot(s);
+    }
+    s.settings.customMap = config;
+    saveMapSettings(config);
+    newGame(s, LEVELS.length, false, createRandomLevel(config));
+    sfx.start();
+  } else if (action === "start" && typeof value === "number" && value >= 0 && value < s.settings.unlockedLevel) {
+    newGame(s, value, false);
+    sfx.start();
+  } else if (action === "demo") newGame(s, 3, true);
+  else if (action === "pause") {
+    g.paused = true;
+    g.cancel();
+  } else if (action === "resume") g.paused = false;
+  else if (action === "zoom" && typeof value === "number") {
+    if (value === 0) g.zoomBy(0);
+    else g.zoomAt(value, canvas.clientWidth / 2, canvas.clientHeight / 2, canvas.clientWidth, canvas.clientHeight);
+  } else if (action === "percent" && [20, 60, 80].includes(value)) g.pct = value;
+  else if (!g.over && !g.paused && !g.demo) {
+    if (action === "selectAll") g.selectAll();
+    else if (action === "clear") {
+      g.cancel();
+      g.sels = [];
+      g.sel = null;
+    }
+  }
+  return snapshot(s);
+}
+function applySettings(canvas, input) {
+  const s = sessions.get(canvas);
+  if (!s) return;
+  s.settings = normalize(input);
+  applyRules(s);
+}
+function dispose(canvas) {
+  const s = sessions.get(canvas);
+  if (!s) return;
+  s.stopped = true;
+  cancelAnimationFrame(s.raf);
+  s.game.cancel();
+  s.abort.abort();
+  s.resizeObserver?.disconnect();
+  s.detachObserver?.disconnect();
+  sessions.delete(canvas);
+  setSound(false);
+}
+export {
+  applySettings,
+  command,
+  dispose,
+  initialize,
+  loadSettings,
+  saveGlobalSettings,
+  saveMapSettings,
+  saveSettings
+};
