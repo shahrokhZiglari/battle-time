@@ -62,7 +62,7 @@
     }
     else if (Screen == GameScreen.Settings)
     {
-        <div class="cg-overlay"><CastleSettingsModal Settings="GameService.Settings" OnSave="SaveRules" OnGenerateMap="GenerateRandomMap" OnClose="ClosePanel" OnReset="ResetProgress" /></div>
+        <div class="cg-overlay"><CastleSettingsModal Settings="GameService.Settings" Module="Module" OnSave="SaveRules" OnApplyImported="ApplyImportedRules" OnGenerateMap="GenerateRandomMap" OnClose="ClosePanel" OnReset="ResetProgress" /></div>
     }
     else if (Screen == GameScreen.Levels)
     {

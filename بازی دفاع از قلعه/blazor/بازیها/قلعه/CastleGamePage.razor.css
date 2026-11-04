@@ -238,3 +238,18 @@
 .cg-volumes .cg-volume { display: flex; align-items: center; gap: .3rem; }
 .cg-volumes .cg-volume > span { flex: 1; min-width: 0; font-size: .95rem; }
 .cg-volumes .cg-volume > b { min-width: 2.6rem; text-align: center; font-size: .95rem; }
+.castle-root ::deep .cg-file-label { display: inline-flex; align-items: center; cursor: pointer; }
+.castle-root ::deep .cg-transfer-editor { display: grid; gap: 8px; margin-top: 10px; padding: 10px; border: 1px solid #e8b44c40; border-radius: 6px; background: #04111680; }
+.castle-root ::deep .cg-json-box {
+    width: 100%;
+    border: 1px solid #83b0c359;
+    border-radius: 5px;
+    background: #041116;
+    color: #f6efe2;
+    padding: 8px 10px;
+    font: 12px/1.45 Consolas, Monaco, monospace;
+    direction: ltr;
+    text-align: left;
+    resize: vertical;
+}
+.castle-root ::deep .cg-json-box:focus { outline: 2px solid #f0c264; border-color: #f0c264; }

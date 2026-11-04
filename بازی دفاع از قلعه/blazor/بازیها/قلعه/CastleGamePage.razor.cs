@@ -185,6 +185,12 @@ public partial class CastleGamePage
         await ClosePanel();
     }
 
+    private async Task ApplyImportedRules(CastleSettings settings)
+    {
+        GameService.UpdateRules(settings);
+        await PersistSettings();
+    }
+
     private async Task GenerateRandomMap(RandomMapSettings map)
     {
         var updated = GameService.Settings.Copy();
