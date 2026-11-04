@@ -1,9 +1,44 @@
+@using System.IO
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.JSInterop
+
 <section class="cg-dialog" role="dialog" aria-modal="true" aria-labelledby="cg-settings-title">
     <div class="cg-dialog-head">
         <div><span class="cg-eyebrow">قوانین بازی</span><h2 id="cg-settings-title">تنظیمات نبرد</h2><span class="cg-version">نسخهٔ ۱۹</span></div>
         <button type="button" class="cg-btn" @onclick="OnClose" aria-label="بستن تنظیمات">بستن</button>
     </div>
     <div class="cg-form">
+        <fieldset class="cg-transfer-box">
+            <legend>خروجی و ورودی تنظیمات (مشترک با وب و آفلاین)</legend>
+            <p class="cg-muted">تنظیمات فعلی را کپی یا دانلود کنید تا در نسخهٔ وب یا آفلاین وارد کنید، یا تنظیمات نسخهٔ دیگر را بارگذاری نمایید.</p>
+            <div class="cg-choice-row" style="margin-top: 8px;">
+                <button type="button" class="cg-btn cg-gold" @onclick="CopySettingsAsync">📋 کپی کد تنظیمات</button>
+                <button type="button" class="cg-btn" @onclick="DownloadSettingsAsync">⬇ دانلود فایل JSON</button>
+                <label class="cg-btn cg-file-label" for="cg-settings-file-input">📂 انتخاب فایل JSON</label>
+                <InputFile id="cg-settings-file-input" OnChange="ImportFileAsync" accept=".json,application/json,text/plain" style="display:none" />
+                <button type="button" class="cg-btn" @onclick="ToggleTransferBox">@(ShowTransferBox ? "بستن کادر کد" : "⇄ نمایش / جایگذاری کد")</button>
+            </div>
+            @if (ShowTransferBox)
+            {
+                <div class="cg-transfer-editor">
+                    <div class="cg-choice-row" style="justify-content: space-between;">
+                        <span class="cg-muted">کد JSON تنظیمات (قابل ویرایش و جایگذاری)</span>
+                        <span class="cg-choice-row">
+                            <button type="button" class="cg-btn" @onclick="FillCurrentJson">تنظیمات فعلی</button>
+                            <button type="button" class="cg-btn" @onclick="ClearTransferJson">خالی کردن کادر</button>
+                        </span>
+                    </div>
+                    <textarea class="cg-json-box" rows="7" dir="ltr" spellcheck="false" @bind="TransferJson" @bind:event="oninput" placeholder="{ &quot;format&quot;: &quot;battle-time-settings&quot;, ... }"></textarea>
+                    <div class="cg-choice-row">
+                        <button type="button" class="cg-btn cg-gold" @onclick="ApplyPastedJsonAsync">✓ اعمال کد واردشده</button>
+                    </div>
+                </div>
+            }
+            @if (!string.IsNullOrEmpty(TransferMessage))
+            {
+                <p class="@(TransferError ? "cg-foe" : "cg-ally")" role="@(TransferError ? "alert" : "status")">@TransferMessage</p>
+            }
+        </fieldset>
         <fieldset>
             <legend>صدا و افکت‌ها</legend>
             <div class="cg-choice-row">
@@ -212,11 +247,116 @@
         ("defeat", "شکست"), ("start", "شروع"), ("hover", "نشانگر"),
     ];
 
+    [Parameter] public IJSObjectReference? Module { get; set; }
     [Parameter] public EventCallback<CastleSettings> OnSave { get; set; }
+    [Parameter] public EventCallback<CastleSettings> OnApplyImported { get; set; }
     [Parameter] public EventCallback<RandomMapSettings> OnGenerateMap { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
     [Parameter] public EventCallback OnReset { get; set; }
     private CastleSettings Draft = new();
+    private bool ShowTransferBox;
+    private string TransferJson = "";
+    private string? TransferMessage;
+    private bool TransferError;
+
+    private async Task CopySettingsAsync()
+    {
+        var json = CastleSettingsTransfer.Export(Draft);
+        TransferJson = json;
+        var copied = false;
+        if (Module is not null)
+        {
+            try { copied = await Module.InvokeAsync<bool>("copySettingsText", json); }
+            catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException) { copied = false; }
+        }
+        if (copied)
+        {
+            TransferError = false;
+            TransferMessage = "کد تنظیمات در حافظه کپی شد ✓";
+        }
+        else
+        {
+            ShowTransferBox = true;
+            TransferError = false;
+            TransferMessage = "کد تنظیمات در کادر زیر آمادهٔ کپی است.";
+        }
+    }
+
+    private async Task DownloadSettingsAsync()
+    {
+        var json = CastleSettingsTransfer.Export(Draft);
+        TransferJson = json;
+        var ok = false;
+        if (Module is not null)
+        {
+            try { ok = await Module.InvokeAsync<bool>("downloadSettingsFile", json, CastleSettingsTransfer.FileName); }
+            catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException) { ok = false; }
+        }
+        TransferError = !ok;
+        TransferMessage = ok
+            ? $"فایل {CastleSettingsTransfer.FileName} دانلود شد ✓"
+            : "مرورگر اجازهٔ دانلود مستقیم نداد؛ از «کپی کد تنظیمات» استفاده کنید.";
+    }
+
+    private void ToggleTransferBox()
+    {
+        if (!ShowTransferBox && string.IsNullOrWhiteSpace(TransferJson))
+        {
+            TransferJson = CastleSettingsTransfer.Export(Draft);
+        }
+        ShowTransferBox = !ShowTransferBox;
+        TransferMessage = null;
+    }
+
+    private void FillCurrentJson()
+    {
+        TransferJson = CastleSettingsTransfer.Export(Draft);
+        TransferMessage = null;
+    }
+
+    private void ClearTransferJson()
+    {
+        TransferJson = string.Empty;
+        TransferMessage = null;
+    }
+
+    private Task ApplyPastedJsonAsync() => ApplyImportedRawAsync(TransferJson, "تنظیمات واردشده");
+
+    private async Task ImportFileAsync(InputFileChangeEventArgs e)
+    {
+        if (e.FileCount == 0) return;
+        try
+        {
+            await using var stream = e.File.OpenReadStream(maxAllowedSize: 256 * 1024);
+            using var reader = new StreamReader(stream);
+            var content = await reader.ReadToEndAsync();
+            TransferJson = content;
+            await ApplyImportedRawAsync(content, $"تنظیمات فایل «{e.File.Name}»");
+        }
+        catch (IOException)
+        {
+            TransferError = true;
+            TransferMessage = "حجم فایل بیش از حد مجاز است یا خواندن آن انجام نشد.";
+        }
+    }
+
+    private async Task ApplyImportedRawAsync(string raw, string sourceLabel)
+    {
+        if (!CastleSettingsTransfer.TryImport(raw, Draft, out var imported, out var error))
+        {
+            TransferError = true;
+            TransferMessage = error ?? "کد تنظیمات معتبر نیست.";
+            return;
+        }
+        Draft = imported.Copy();
+        TransferJson = CastleSettingsTransfer.Export(Draft);
+        TransferError = false;
+        TransferMessage = $"{sourceLabel} با موفقیت اعمال و ذخیره شد ✓";
+        if (OnApplyImported.HasDelegate)
+        {
+            await OnApplyImported.InvokeAsync(Draft.Copy());
+        }
+    }
 
     /// <summary>درصدِ یک صدا برای نمایش (گرد‌شده)</summary>
     private string PercentOf(string key) => ((int)Math.Round(Draft.VolumeOf(key) * 100)).ToString() + "٪";

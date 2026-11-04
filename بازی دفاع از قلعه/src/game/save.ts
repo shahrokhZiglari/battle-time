@@ -1,4 +1,4 @@
-import { DEFAULT_RANDOM_MAP, normalizeRandomMap, RandomMapSettings } from "./map";
+import { DEFAULT_RANDOM_MAP, normalizeRandomMap, RandomMapSettings, validateRandomMap } from "./map";
 import { SFX_KEYS, type SfxKey } from "./sound";
 import {
   applyUnitTuning,
@@ -8,6 +8,7 @@ import {
   normalizeHaloSpin,
   normalizeAttackDash,
   normalizeUnitTuning,
+  TROOP_TYPES,
   UnitTuningMap,
 } from "./config";
 
@@ -206,7 +207,12 @@ export function normalizeGlobalSettings(raw: Partial<GlobalSettings> | null | un
   else base.done = base.done.slice(0, 30).map((d) => d === true);
   base.unlocked = Math.max(1, Math.min(30, Number(base.unlocked) || 1));
   if (base.battleMode !== "field" && base.battleMode !== "castle") base.battleMode = "field";
-  base.maxTroops = VALID_CAPS.includes(Number(base.maxTroops)) ? Number(base.maxTroops) : 50;
+  const cap = Number(base.maxTroops);
+  base.maxTroops = VALID_CAPS.includes(cap)
+    ? cap
+    : Number.isFinite(cap) && cap >= 1 && cap <= 1000
+      ? Math.floor(cap)
+      : 50;
   base.openRoads = base.openRoads === true;
   const dist = Number(base.minCastleDistance);
   base.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 30;
@@ -338,3 +344,360 @@ export function persist(s: Save) {
   persistGlobalSettings(s);
   persistMapSettings(s.customMap);
 }
+
+/* =====================================================================
+ * تبادلِ تنظیمات بین همهٔ نسخه‌ها (وب، فایل آفلاین و Blazor Server)
+ * ===================================================================== */
+
+export const SETTINGS_TRANSFER_FORMAT = "battle-time-settings" as const;
+export const SETTINGS_TRANSFER_VERSION = 1 as const;
+export const SETTINGS_FILE_NAME = "battle-time-settings.json";
+
+export interface PortableSettings {
+  format: typeof SETTINGS_TRANSFER_FORMAT;
+  version: typeof SETTINGS_TRANSFER_VERSION;
+  sound: {
+    enabled: boolean;
+    ambient: boolean;
+    march: boolean;
+    volumes: Record<SfxKey, number>;
+  };
+  gameplay: {
+    speed: number;
+    battleMode: "field" | "castle";
+    maxTroops: number;
+    openRoads: boolean;
+    minCastleDistance: number;
+  };
+  units: UnitTuningMap;
+  visuals: {
+    haloSpin: number;
+    attackDash: number;
+  };
+  randomMap: RandomMapSettings;
+}
+
+export type SettingsImportResult =
+  | { ok: true; save: Save }
+  | { ok: false; error: string };
+
+const round2 = (v: number) => Math.round(v * 100) / 100;
+
+/** ساختِ ساختارِ استاندارد و خوانا از روی تنظیماتِ فعلی */
+export function toPortableSettings(save: Save): PortableSettings {
+  const g = normalizeGlobalSettings(save);
+  const m = normalizeRandomMap(save.customMap);
+  const units = {} as UnitTuningMap;
+  for (const t of TROOP_TYPES) {
+    units[t] = {
+      power: round2(g.unitTuning[t].power),
+      speed: round2(g.unitTuning[t].speed),
+    };
+  }
+  return {
+    format: SETTINGS_TRANSFER_FORMAT,
+    version: SETTINGS_TRANSFER_VERSION,
+    sound: {
+      enabled: g.snd,
+      ambient: g.ambientSound,
+      march: g.marchSound,
+      volumes: { ...g.volumes },
+    },
+    gameplay: {
+      speed: g.speed,
+      battleMode: g.battleMode,
+      maxTroops: g.maxTroops,
+      openRoads: g.openRoads,
+      minCastleDistance: g.minCastleDistance,
+    },
+    units,
+    visuals: {
+      haloSpin: round2(g.haloSpin),
+      attackDash: round2(g.attackDash),
+    },
+    randomMap: m,
+  };
+}
+
+/** خروجیِ متنیِ JSON برای کپی یا ذخیره در فایل */
+export function exportSettingsJson(save: Save): string {
+  return JSON.stringify(toPortableSettings(save), null, 2);
+}
+
+function asPlainRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function readProp(source: Record<string, unknown> | null, ...keys: string[]): { found: boolean; value: unknown } {
+  if (!source) return { found: false, value: undefined };
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(source, key) && source[key] !== undefined) {
+      return { found: true, value: source[key] };
+    }
+  }
+  return { found: false, value: undefined };
+}
+
+function parseBattleModeValue(value: unknown): "field" | "castle" | null {
+  if (value === "field" || value === "Field" || value === 0) return "field";
+  if (value === "castle" || value === "Castle" || value === 1) return "castle";
+  return null;
+}
+
+/**
+ * خواندن و اعتبارسنجیِ JSON تنظیمات از هر نسخهٔ بازی:
+ *   • قالبِ مشترکِ خروجی (`battle-time-settings`)
+ *   • قالبِ خامِ نسخهٔ وب / آفلاین (`bt_settings_v1` و `bt_map_v1`)
+ *   • قالبِ خامِ نسخهٔ Blazor (`CastleSettings` چه‌ camelCase و چه‌ PascalCase)
+ *   • یا فقط تنظیماتِ نقشهٔ رندوم
+ * پیشرفتِ مراحلِ بازیکن (`unlocked` و `done`) دست‌نخورده حفظ می‌شود.
+ */
+export function importSettingsJson(text: string, current?: Save): SettingsImportResult {
+  const cleaned = typeof text === "string" ? text.replace(/^\uFEFF/, "").trim() : "";
+  if (!cleaned) {
+    return { ok: false, error: "کادر خالی است؛ کد JSON تنظیمات را وارد یا فایل را انتخاب کنید." };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    return { ok: false, error: "کد واردشده JSON معتبر نیست؛ مطمئن شوید متن کامل کپی شده باشد." };
+  }
+
+  const root = asPlainRecord(parsed);
+  if (!root) {
+    return { ok: false, error: "ساختار تنظیمات نامعتبر است؛ یک شیء JSON انتظار می‌رفت." };
+  }
+
+  const base: Save = current
+    ? { ...normalizeGlobalSettings(current), customMap: normalizeRandomMap(current.customMap) }
+    : loadSave();
+
+  const soundObj = asPlainRecord(readProp(root, "sound", "Sound").value);
+  const gameObj = asPlainRecord(readProp(root, "gameplay", "Gameplay").value);
+  const unitsObj = asPlainRecord(
+    readProp(root, "units", "Units", "unitTuning", "UnitTuning", "troopTuning", "TroopTuning").value,
+  );
+  const visObj = asPlainRecord(readProp(root, "visuals", "Visuals").value);
+  const nestedMapObj = asPlainRecord(readProp(root, "randomMap", "RandomMap", "customMap", "CustomMap").value);
+
+  const draftGlobal: Partial<GlobalSettings> = {
+    ...globalSliceOf(base),
+    unlocked: base.unlocked,
+    done: [...base.done],
+    unitTuning: {
+      normal: { ...base.unitTuning.normal },
+      fast: { ...base.unitTuning.fast },
+      heavy: { ...base.unitTuning.heavy },
+    },
+    volumes: { ...base.volumes },
+  };
+  const draftMap: Partial<RandomMapSettings> = { ...base.customMap };
+
+  let recognized = 0;
+
+  // ۱) صدا و بلندی‌ها
+  const sndProp = soundObj ? readProp(soundObj, "enabled", "Enabled") : readProp(root, "snd", "soundEnabled", "SoundEnabled");
+  if (sndProp.found && typeof sndProp.value === "boolean") {
+    draftGlobal.snd = sndProp.value;
+    recognized++;
+  }
+  const ambProp = soundObj ? readProp(soundObj, "ambient", "Ambient") : readProp(root, "ambientSound", "AmbientSound");
+  if (ambProp.found && typeof ambProp.value === "boolean") {
+    draftGlobal.ambientSound = ambProp.value;
+    recognized++;
+  }
+  const marchProp = soundObj ? readProp(soundObj, "march", "March") : readProp(root, "marchSound", "MarchSound");
+  if (marchProp.found && typeof marchProp.value === "boolean") {
+    draftGlobal.marchSound = marchProp.value;
+    recognized++;
+  }
+  const volsRaw = asPlainRecord((soundObj ? readProp(soundObj, "volumes", "Volumes") : readProp(root, "volumes", "Volumes")).value);
+  if (volsRaw) {
+    for (const key of SFX_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(volsRaw, key) && Number.isFinite(Number(volsRaw[key]))) {
+        draftGlobal.volumes![key] = Number(volsRaw[key]);
+        recognized++;
+      }
+    }
+  }
+
+  // ۲) قوانینِ بازی
+  const speedProp = gameObj ? readProp(gameObj, "speed", "Speed") : readProp(root, "speed", "speedMultiplier", "SpeedMultiplier");
+  if (speedProp.found && Number.isFinite(Number(speedProp.value))) {
+    draftGlobal.speed = Number(speedProp.value);
+    recognized++;
+  }
+  const bmProp = gameObj ? readProp(gameObj, "battleMode", "BattleMode") : readProp(root, "battleMode", "BattleMode");
+  if (bmProp.found) {
+    const bm = parseBattleModeValue(bmProp.value);
+    if (bm) {
+      draftGlobal.battleMode = bm;
+      recognized++;
+    }
+  }
+  const capProp = gameObj
+    ? readProp(gameObj, "maxTroops", "MaxTroops", "maxTroopsCap", "MaxTroopsCap")
+    : readProp(root, "maxTroops", "maxTroopsCap", "MaxTroopsCap");
+  if (capProp.found && Number.isFinite(Number(capProp.value))) {
+    draftGlobal.maxTroops = Number(capProp.value);
+    recognized++;
+  }
+  const roadsProp = gameObj ? readProp(gameObj, "openRoads", "OpenRoads") : readProp(root, "openRoads", "OpenRoads");
+  if (roadsProp.found && typeof roadsProp.value === "boolean") {
+    draftGlobal.openRoads = roadsProp.value;
+    recognized++;
+  }
+  const distProp = gameObj
+    ? readProp(gameObj, "minCastleDistance", "MinCastleDistance")
+    : readProp(root, "minCastleDistance", "MinCastleDistance");
+  if (distProp.found && Number.isFinite(Number(distProp.value))) {
+    draftGlobal.minCastleDistance = Number(distProp.value);
+    recognized++;
+  }
+
+  // ۳) قدرت و سرعتِ سربازها (هم ساختارِ تودرتو و هم ساختارِ تختِ Blazor)
+  if (unitsObj) {
+    for (const type of TROOP_TYPES) {
+      const capType = type[0].toUpperCase() + type.slice(1);
+      const sub = asPlainRecord(readProp(unitsObj, type, capType).value);
+      const pProp = sub
+        ? readProp(sub, "power", "Power")
+        : readProp(unitsObj, `${type}Power`, `${capType}Power`);
+      const sProp = sub
+        ? readProp(sub, "speed", "Speed")
+        : readProp(unitsObj, `${type}Speed`, `${capType}Speed`);
+      if (pProp.found && Number.isFinite(Number(pProp.value))) {
+        draftGlobal.unitTuning![type].power = Number(pProp.value);
+        recognized++;
+      }
+      if (sProp.found && Number.isFinite(Number(sProp.value))) {
+        draftGlobal.unitTuning![type].speed = Number(sProp.value);
+        recognized++;
+      }
+    }
+  }
+
+  // ۴) نمایش
+  const haloProp = visObj ? readProp(visObj, "haloSpin", "HaloSpin") : readProp(root, "haloSpin", "HaloSpin");
+  if (haloProp.found && Number.isFinite(Number(haloProp.value))) {
+    draftGlobal.haloSpin = Number(haloProp.value);
+    recognized++;
+  }
+  const dashProp = visObj ? readProp(visObj, "attackDash", "AttackDash") : readProp(root, "attackDash", "AttackDash");
+  if (dashProp.found && Number.isFinite(Number(dashProp.value))) {
+    draftGlobal.attackDash = Number(dashProp.value);
+    recognized++;
+  }
+
+  // ۵) نقشهٔ رندوم (چه در زیرشاخهٔ randomMap/customMap و چه به‌تنهایی در ریشه)
+  const mapSource = nestedMapObj ?? root;
+  const mapNumKeys: [keyof RandomMapSettings, string][] = [
+    ["players", "Players"],
+    ["normal", "Normal"],
+    ["fast", "Fast"],
+    ["heavy", "Heavy"],
+    ["towers", "Towers"],
+    ["lakes", "Lakes"],
+    ["ships", "Ships"],
+    ["boats", "Boats"],
+    ["minDistance", "MinDistance"],
+  ];
+  let touchedMap = false;
+  for (const [camel, pascal] of mapNumKeys) {
+    const p = readProp(mapSource, camel, pascal);
+    if (p.found && Number.isFinite(Number(p.value))) {
+      (draftMap as Record<string, unknown>)[camel] = Number(p.value);
+      recognized++;
+      touchedMap = true;
+    }
+  }
+  const largeProp = readProp(mapSource, "largeMap", "LargeMap");
+  if (largeProp.found && typeof largeProp.value === "boolean") {
+    draftMap.largeMap = largeProp.value;
+    recognized++;
+    touchedMap = true;
+  }
+  const randRoadsProp = readProp(mapSource, "randomRoads", "RandomRoads");
+  if (randRoadsProp.found && typeof randRoadsProp.value === "boolean") {
+    draftMap.randomRoads = randRoadsProp.value;
+    recognized++;
+    touchedMap = true;
+  }
+
+  if (recognized === 0) {
+    return { ok: false, error: "هیچ تنظیم شناخته‌شده‌ای در این کد یا فایل پیدا نشد." };
+  }
+
+  const nextMap = normalizeRandomMap(draftMap);
+  if (touchedMap) {
+    const mapErr = validateRandomMap(nextMap);
+    if (mapErr) return { ok: false, error: mapErr };
+  }
+
+  const nextGlobal = normalizeGlobalSettings(draftGlobal);
+  return {
+    ok: true,
+    save: {
+      ...nextGlobal,
+      unlocked: base.unlocked,
+      done: [...base.done],
+      customMap: nextMap,
+    },
+  };
+}
+
+/** کپیِ ایمن در حافظهٔ مرورگر (هم در وب و هم در حالتِ آفلاین file://) */
+export async function copyTextToClipboard(text: string): Promise<boolean> {
+  try {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* در file:// یا قاب‌های محدود، به روشِ جایگزین می‌رویم */
+  }
+  if (typeof document === "undefined") return false;
+  try {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "true");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    area.style.pointerEvents = "none";
+    area.style.left = "-9999px";
+    document.body.appendChild(area);
+    area.focus();
+    area.select();
+    area.setSelectionRange(0, text.length);
+    const ok = document.execCommand("copy");
+    document.body.removeChild(area);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+/** دانلودِ مستقیمِ تنظیمات به‌صورت فایل JSON در مرورگر */
+export function downloadJsonFile(text: string, filename = SETTINGS_FILE_NAME): boolean {
+  if (typeof document === "undefined" || typeof Blob === "undefined" || typeof URL === "undefined") return false;
+  try {
+    const blob = new Blob([text], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename || SETTINGS_FILE_NAME;
+    link.style.display = "none";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    return true;
+  } catch {
+    return false;
+  }
+}
+

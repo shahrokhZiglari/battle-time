@@ -1,7 +1,14 @@
-import { ReactNode } from "react";
+import { ReactNode, useRef, useState } from "react";
 import { LEVELS, TROOP_TYPES, UNIT_LIMITS, HALO_SPIN_LIMITS, ATTACK_DASH_LIMITS, fa } from "../game/config";
 import { MAX_BOATS, MAX_LAKES, MAX_SHIPS } from "../game/map";
-import { Save } from "../game/save";
+import {
+  copyTextToClipboard,
+  downloadJsonFile,
+  exportSettingsJson,
+  importSettingsJson,
+  Save,
+  SETTINGS_FILE_NAME,
+} from "../game/save";
 import { SFX_KEYS, SFX_FULL_NAMES, SFX_LABELS, type SfxKey } from "../game/sound";
 import GestureDemo from "./GestureDemo";
 import { RotateRow } from "./RotateControl";
@@ -471,6 +478,66 @@ export function SettingsPanel({
   /** اگر از داخلِ نبرد باز شده، دکمهٔ پایان باید «بازگشت به بازی» باشد */
   fromGame?: boolean;
 }) {
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferText, setTransferText] = useState("");
+  const [transferMsg, setTransferMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const openTransfer = () => {
+    setTransferText(exportSettingsJson(save));
+    setTransferMsg(null);
+    setTransferOpen(true);
+  };
+
+  const handleCopySettings = async () => {
+    const json = exportSettingsJson(save);
+    setTransferText(json);
+    const copied = await copyTextToClipboard(json);
+    if (copied) {
+      setTransferMsg({ ok: true, text: "کد تنظیمات در حافظه کپی شد ✓" });
+    } else {
+      textAreaRef.current?.focus();
+      textAreaRef.current?.select();
+      setTransferMsg({ ok: true, text: "متن در کادر انتخاب شد؛ با Ctrl+C یا کپی مرورگر بردارید." });
+    }
+  };
+
+  const handleDownloadSettings = () => {
+    const json = exportSettingsJson(save);
+    setTransferText(json);
+    const ok = downloadJsonFile(json, SETTINGS_FILE_NAME);
+    setTransferMsg(
+      ok
+        ? { ok: true, text: `فایل ${SETTINGS_FILE_NAME} دانلود شد ✓` }
+        : { ok: false, text: "مرورگر اجازهٔ دانلود مستقیم نداد؛ از «کپی کد تنظیمات» استفاده کنید." },
+    );
+  };
+
+  const applyImportedText = (rawText: string, sourceLabel: string) => {
+    const result = importSettingsJson(rawText, save);
+    if (!result.ok) {
+      setTransferMsg({ ok: false, text: result.error });
+      return;
+    }
+    onChange(() => result.save);
+    setTransferText(exportSettingsJson(result.save));
+    setTransferMsg({ ok: true, text: `${sourceLabel} با موفقیت اعمال و ذخیره شد ✓` });
+  };
+
+  const handleFilePicked = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const content = await file.text();
+      setTransferText(content);
+      applyImportedText(content, `تنظیمات فایل «${file.name}»`);
+    } catch {
+      setTransferMsg({ ok: false, text: "خواندن فایل انجام نشد؛ دوباره تلاش کنید." });
+    }
+  };
+
   /** بلندیِ یک صدا (۰..۱) — هر ردیف فقط کلیدِ خودش را دست می‌زند */
   const setVol = (key: SfxKey) => (value: number) =>
     onChange((prev) => ({
@@ -480,17 +547,160 @@ export function SettingsPanel({
 
   const pct = (v: number) => `${fa(Math.round(v * 100))}٪`;
 
+  if (transferOpen) {
+    return (
+      <Modal onScrim={() => setTransferOpen(false)}>
+        <div className="flex items-center justify-between gap-2 border-b border-brass/20 px-2.5 py-1.5">
+          <div className="flex min-w-0 items-baseline gap-1.5">
+            <h2 className="font-display text-[17px] leading-none text-bone">خروجی و ورودی تنظیمات</h2>
+            <span className="shrink-0 text-[11px] text-brass/80">وب · آفلاین · Blazor</span>
+          </div>
+          <Btn
+            tone="ghost"
+            onClick={() => setTransferOpen(false)}
+            className="shrink-0 px-2 py-[3px] text-[12px] font-bold"
+          >
+            ← تنظیمات
+          </Btn>
+        </div>
+
+        <div className="space-y-2 p-2.5">
+          <p className="text-[12px] leading-relaxed text-ash">
+            تنظیمات فعلی (بلندی صداها، قدرت و سرعت نیروها، قوانین بازی و نقشهٔ رندوم) را کپی یا دانلود کنید تا در نسخه‌های دیگر وارد کنید، یا کد نسخهٔ دیگر را در کادر زیر جایگذاری نمایید.
+          </p>
+
+          <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
+            <button
+              type="button"
+              onClick={handleCopySettings}
+              className="btn btn-steel min-h-[34px] px-2.5 py-1.5 text-[12px] font-bold !border-brass/45 text-bone"
+            >
+              📋 کپی کد تنظیمات
+            </button>
+            <button
+              type="button"
+              onClick={handleDownloadSettings}
+              className="btn btn-steel min-h-[34px] px-2.5 py-1.5 text-[12px] font-bold"
+            >
+              ⬇ دانلود فایل JSON
+            </button>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="btn btn-steel min-h-[34px] px-2.5 py-1.5 text-[12px] font-bold"
+            >
+              📂 انتخاب فایل JSON
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json,application/json,text/plain"
+              onChange={handleFilePicked}
+              className="hidden"
+            />
+          </div>
+
+          <div className="rounded-lg border border-brass/20 bg-white/[0.02] p-2">
+            <div className="mb-1.5 flex flex-wrap items-center justify-between gap-1">
+              <label htmlFor="bt-settings-json" className="text-[12px] font-bold text-bone">
+                کد JSON تنظیمات (قابل ویرایش و جایگذاری)
+              </label>
+              <span className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTransferText(exportSettingsJson(save));
+                    setTransferMsg(null);
+                  }}
+                  className="rounded border border-white/15 bg-white/[0.04] px-2 py-0.5 text-[11.5px] text-ash transition-colors hover:bg-white/[0.1] hover:text-bone"
+                >
+                  تنظیمات فعلی
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTransferText("");
+                    setTransferMsg(null);
+                    textAreaRef.current?.focus();
+                  }}
+                  className="rounded border border-white/15 bg-white/[0.04] px-2 py-0.5 text-[11.5px] text-ash transition-colors hover:bg-white/[0.1] hover:text-bone"
+                >
+                  خالی کردن کادر
+                </button>
+              </span>
+            </div>
+            <textarea
+              id="bt-settings-json"
+              ref={textAreaRef}
+              dir="ltr"
+              rows={8}
+              spellCheck={false}
+              value={transferText}
+              onChange={(e) => {
+                setTransferText(e.target.value);
+                if (transferMsg) setTransferMsg(null);
+              }}
+              placeholder='{ "format": "battle-time-settings", ... }'
+              className="w-full resize-y rounded border border-white/15 bg-[#041116] p-2 font-mono text-[12px] leading-snug text-bone outline-none focus:border-brass"
+            />
+          </div>
+
+          {transferMsg && (
+            <div
+              role={transferMsg.ok ? "status" : "alert"}
+              className={`rounded-lg border px-2.5 py-1.5 text-[12px] font-bold ${
+                transferMsg.ok
+                  ? "border-ally/45 bg-ally/12 text-ally"
+                  : "border-foe/45 bg-foe/12 text-foe"
+              }`}
+            >
+              {transferMsg.text}
+            </div>
+          )}
+
+          <div className="flex items-center gap-1.5 border-t border-brass/25 pt-2">
+            <button
+              type="button"
+              onClick={() => applyImportedText(transferText, "تنظیمات واردشده")}
+              className="btn btn-brass min-h-[38px] flex-1 px-4 text-[14px] font-black"
+            >
+              ✓ اعمال کد واردشده
+            </button>
+            <Btn
+              tone="ghost"
+              onClick={() => setTransferOpen(false)}
+              className="min-h-[38px] shrink-0 px-3 text-[12.5px] font-bold"
+            >
+              بازگشت
+            </Btn>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
   return (
     <Modal onScrim={onBack}>
       {/* سرِ فشرده — یک ردیفِ کوتاه تا برای محتوا جا بماند */}
-      <div className="flex items-center justify-between gap-2 border-b border-brass/20 px-2 py-0.5">
+      <div className="flex items-center justify-between gap-1.5 border-b border-brass/20 px-2 py-0.5">
         <div className="flex min-w-0 items-baseline gap-1.5">
           <h2 className="font-display text-[18px] leading-none text-bone">تنظیمات</h2>
           <span className="shrink-0 text-[11px] text-ash/70">نسخهٔ ۱۹</span>
         </div>
-        <Btn tone="ghost" onClick={onBack} className="shrink-0 px-2 py-[3px] text-[12px] font-bold">
-          بازگشت ✕
-        </Btn>
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            onClick={openTransfer}
+            aria-label="خروجی و ورودی تنظیمات"
+            title="کپی، دانلود یا وارد کردن تنظیمات بین نسخهٔ وب، آفلاین و Blazor"
+            className="btn btn-steel !bg-transparent shrink-0 px-2 py-[3px] text-[11.5px] font-bold !border-brass/45 text-brass hover:!bg-brass/15"
+          >
+            خروجی / ورودی ⇄
+          </button>
+          <Btn tone="ghost" onClick={onBack} className="shrink-0 px-2 py-[3px] text-[12px] font-bold">
+            بازگشت ✕
+          </Btn>
+        </div>
       </div>
 
       <div className="space-y-[3px] p-1.5">
@@ -612,7 +822,7 @@ export function SettingsPanel({
             </div>
             <div className="flex items-center gap-1 rounded border border-white/10 bg-white/[0.03] px-1 py-[1px]">
               <span className="shrink-0 text-[11.5px] text-ash" title="سقف تولید تمام قلعه‌ها (خودی و دشمن)">
-                سقف تولید
+                {[30, 40, 50, 60, 80, 100].includes(save.maxTroops) ? "سقف تولید" : `سقف تولید (${fa(save.maxTroops)})`}
               </span>
               <span className="flex flex-1 justify-end gap-[2px]">
                 {[30, 40, 50, 60, 80, 100].map((cap) => (

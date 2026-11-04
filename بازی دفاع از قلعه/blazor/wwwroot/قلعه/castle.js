@@ -3520,6 +3520,463 @@ function render(c, g, T, W, H, dpr) {
   c.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
+// src/game/save.ts
+var GLOBAL_KEY = "bt_settings_v1";
+var MAP_KEY = "bt_map_v1";
+var GLOBAL_BACKUP = "bt_settings_v1.bak";
+var MAP_BACKUP = "bt_map_v1.bak";
+var RECOVERED_KEY = "bt_settings_v1.recovered";
+var LEGACY_KEY = "bt_save_v2";
+var OLD_KEYS = ["bt_save", "bt_settings_v0", "castle_defense_v1"];
+var DEAD_GLOBAL_FIELDS = ["customMap", "mountains", "mountainScale"];
+var globalExtras = {};
+var mapExtras = {};
+var VALID_CAPS = [30, 40, 50, 60, 80, 100];
+var DEFAULT_GLOBAL_SETTINGS = {
+  unlocked: 1,
+  done: [],
+  snd: true,
+  speed: 1,
+  battleMode: "field",
+  maxTroops: 50,
+  openRoads: true,
+  minCastleDistance: 30,
+  ambientSound: true,
+  marchSound: true,
+  unitTuning: DEFAULT_UNIT_TUNING,
+  haloSpin: DEFAULT_HALO_SPIN,
+  attackDash: DEFAULT_ATTACK_DASH,
+  volumes: Object.fromEntries(SFX_KEYS.map((k) => [k, 1]))
+};
+function writeJSON(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+  }
+}
+function readRaw(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function parseObject(text) {
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+function writeWithBackup(key, backupKey, value) {
+  const current = readRaw(key);
+  if (current) {
+    if (parseObject(current)) {
+      try {
+        localStorage.setItem(backupKey, current);
+      } catch {
+      }
+    } else {
+      try {
+        localStorage.setItem(RECOVERED_KEY, current);
+      } catch {
+      }
+    }
+  }
+  writeJSON(key, value);
+}
+function pickExtras(source, known) {
+  if (!source) return {};
+  const extras = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (!known.includes(key)) extras[key] = value;
+  }
+  return extras;
+}
+function readFirstAvailable(primary, backup, legacyKeys) {
+  for (const key of [primary, backup, ...legacyKeys]) {
+    const raw = readRaw(key);
+    const parsed = parseObject(raw);
+    if (parsed) return { parsed, key };
+  }
+  return null;
+}
+function normalizeGlobalSettings(raw) {
+  const base = {
+    ...DEFAULT_GLOBAL_SETTINGS,
+    unitTuning: { ...DEFAULT_UNIT_TUNING },
+    done: [...DEFAULT_GLOBAL_SETTINGS.done]
+  };
+  if (raw && typeof raw === "object") {
+    const source = raw;
+    for (const key of Object.keys(DEFAULT_GLOBAL_SETTINGS)) {
+      const value = source[key];
+      if (value === void 0) continue;
+      if (key === "done") {
+        base.done = Array.isArray(value) ? value : [];
+      } else if (key === "unitTuning") {
+        base.unitTuning = value;
+      } else {
+        base[key] = value;
+      }
+    }
+  }
+  if (!Array.isArray(base.done)) base.done = [];
+  else base.done = base.done.slice(0, 30).map((d) => d === true);
+  base.unlocked = Math.max(1, Math.min(30, Number(base.unlocked) || 1));
+  if (base.battleMode !== "field" && base.battleMode !== "castle") base.battleMode = "field";
+  const cap = Number(base.maxTroops);
+  base.maxTroops = VALID_CAPS.includes(cap) ? cap : Number.isFinite(cap) && cap >= 1 && cap <= 1e3 ? Math.floor(cap) : 50;
+  base.openRoads = base.openRoads === true;
+  const dist = Number(base.minCastleDistance);
+  base.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 30;
+  base.ambientSound = base.ambientSound !== false;
+  base.marchSound = base.marchSound !== false;
+  base.snd = base.snd !== false;
+  const speed = Number(base.speed);
+  base.speed = speed === 2 || speed === 3 ? speed : 1;
+  base.unitTuning = normalizeUnitTuning(base.unitTuning);
+  base.haloSpin = normalizeHaloSpin(base.haloSpin);
+  base.attackDash = normalizeAttackDash(base.attackDash);
+  const rawVolumes = base.volumes && typeof base.volumes === "object" ? base.volumes : {};
+  base.volumes = Object.fromEntries(
+    SFX_KEYS.map((key) => {
+      const v = Number(rawVolumes[key]);
+      return [key, Number.isFinite(v) ? Math.max(0, Math.min(1, Math.round(v * 100) / 100)) : 1];
+    })
+  );
+  return base;
+}
+function globalSliceOf(s) {
+  return {
+    unlocked: s.unlocked,
+    done: s.done,
+    snd: s.snd,
+    speed: s.speed,
+    battleMode: s.battleMode,
+    maxTroops: s.maxTroops,
+    openRoads: s.openRoads,
+    minCastleDistance: s.minCastleDistance,
+    ambientSound: s.ambientSound,
+    marchSound: s.marchSound,
+    unitTuning: s.unitTuning,
+    haloSpin: s.haloSpin,
+    attackDash: s.attackDash,
+    volumes: s.volumes
+  };
+}
+function loadGlobalSettings() {
+  const found = readFirstAvailable(GLOBAL_KEY, GLOBAL_BACKUP, [...OLD_KEYS, LEGACY_KEY]);
+  if (found) {
+    const clean2 = normalizeGlobalSettings(found.parsed);
+    globalExtras = pickExtras(found.parsed, Object.keys(DEFAULT_GLOBAL_SETTINGS));
+    for (const dead of DEAD_GLOBAL_FIELDS) delete globalExtras[dead];
+    const merged = { ...globalExtras, ...globalSliceOf(clean2) };
+    if (found.key !== GLOBAL_KEY || JSON.stringify(merged) !== JSON.stringify(found.parsed)) {
+      writeWithBackup(GLOBAL_KEY, GLOBAL_BACKUP, merged);
+    }
+    return clean2;
+  }
+  const clean = normalizeGlobalSettings(null);
+  writeJSON(GLOBAL_KEY, globalSliceOf(clean));
+  return clean;
+}
+function loadMapSettings() {
+  const found = readFirstAvailable(MAP_KEY, MAP_BACKUP, [...OLD_KEYS, LEGACY_KEY]);
+  if (found) {
+    const source = found.parsed;
+    const clean2 = normalizeRandomMap(source.customMap ?? source);
+    mapExtras = pickExtras(source.customMap ?? source, Object.keys(DEFAULT_RANDOM_MAP));
+    delete mapExtras.mountains;
+    const merged = { ...mapExtras, ...clean2 };
+    if (found.key !== MAP_KEY || JSON.stringify(merged) !== JSON.stringify(found.parsed)) {
+      writeWithBackup(MAP_KEY, MAP_BACKUP, merged);
+    }
+    return clean2;
+  }
+  const clean = normalizeRandomMap(DEFAULT_RANDOM_MAP);
+  writeJSON(MAP_KEY, clean);
+  return clean;
+}
+function loadSave() {
+  const global = loadGlobalSettings();
+  const customMap = loadMapSettings();
+  applyUnitTuning(global.unitTuning);
+  return { ...global, customMap };
+}
+var SETTINGS_TRANSFER_FORMAT = "battle-time-settings";
+var SETTINGS_TRANSFER_VERSION = 1;
+var SETTINGS_FILE_NAME = "battle-time-settings.json";
+var round2 = (v) => Math.round(v * 100) / 100;
+function toPortableSettings(save) {
+  const g = normalizeGlobalSettings(save);
+  const m = normalizeRandomMap(save.customMap);
+  const units = {};
+  for (const t of TROOP_TYPES) {
+    units[t] = {
+      power: round2(g.unitTuning[t].power),
+      speed: round2(g.unitTuning[t].speed)
+    };
+  }
+  return {
+    format: SETTINGS_TRANSFER_FORMAT,
+    version: SETTINGS_TRANSFER_VERSION,
+    sound: {
+      enabled: g.snd,
+      ambient: g.ambientSound,
+      march: g.marchSound,
+      volumes: { ...g.volumes }
+    },
+    gameplay: {
+      speed: g.speed,
+      battleMode: g.battleMode,
+      maxTroops: g.maxTroops,
+      openRoads: g.openRoads,
+      minCastleDistance: g.minCastleDistance
+    },
+    units,
+    visuals: {
+      haloSpin: round2(g.haloSpin),
+      attackDash: round2(g.attackDash)
+    },
+    randomMap: m
+  };
+}
+function exportSettingsJson(save) {
+  return JSON.stringify(toPortableSettings(save), null, 2);
+}
+function asPlainRecord(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+function readProp(source, ...keys) {
+  if (!source) return { found: false, value: void 0 };
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(source, key) && source[key] !== void 0) {
+      return { found: true, value: source[key] };
+    }
+  }
+  return { found: false, value: void 0 };
+}
+function parseBattleModeValue(value) {
+  if (value === "field" || value === "Field" || value === 0) return "field";
+  if (value === "castle" || value === "Castle" || value === 1) return "castle";
+  return null;
+}
+function importSettingsJson(text, current) {
+  const cleaned = typeof text === "string" ? text.replace(/^\uFEFF/, "").trim() : "";
+  if (!cleaned) {
+    return { ok: false, error: "کادر خالی است؛ کد JSON تنظیمات را وارد یا فایل را انتخاب کنید." };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    return { ok: false, error: "کد واردشده JSON معتبر نیست؛ مطمئن شوید متن کامل کپی شده باشد." };
+  }
+  const root = asPlainRecord(parsed);
+  if (!root) {
+    return { ok: false, error: "ساختار تنظیمات نامعتبر است؛ یک شیء JSON انتظار می‌رفت." };
+  }
+  const base = current ? { ...normalizeGlobalSettings(current), customMap: normalizeRandomMap(current.customMap) } : loadSave();
+  const soundObj = asPlainRecord(readProp(root, "sound", "Sound").value);
+  const gameObj = asPlainRecord(readProp(root, "gameplay", "Gameplay").value);
+  const unitsObj = asPlainRecord(
+    readProp(root, "units", "Units", "unitTuning", "UnitTuning", "troopTuning", "TroopTuning").value
+  );
+  const visObj = asPlainRecord(readProp(root, "visuals", "Visuals").value);
+  const nestedMapObj = asPlainRecord(readProp(root, "randomMap", "RandomMap", "customMap", "CustomMap").value);
+  const draftGlobal = {
+    ...globalSliceOf(base),
+    unlocked: base.unlocked,
+    done: [...base.done],
+    unitTuning: {
+      normal: { ...base.unitTuning.normal },
+      fast: { ...base.unitTuning.fast },
+      heavy: { ...base.unitTuning.heavy }
+    },
+    volumes: { ...base.volumes }
+  };
+  const draftMap = { ...base.customMap };
+  let recognized = 0;
+  const sndProp = soundObj ? readProp(soundObj, "enabled", "Enabled") : readProp(root, "snd", "soundEnabled", "SoundEnabled");
+  if (sndProp.found && typeof sndProp.value === "boolean") {
+    draftGlobal.snd = sndProp.value;
+    recognized++;
+  }
+  const ambProp = soundObj ? readProp(soundObj, "ambient", "Ambient") : readProp(root, "ambientSound", "AmbientSound");
+  if (ambProp.found && typeof ambProp.value === "boolean") {
+    draftGlobal.ambientSound = ambProp.value;
+    recognized++;
+  }
+  const marchProp = soundObj ? readProp(soundObj, "march", "March") : readProp(root, "marchSound", "MarchSound");
+  if (marchProp.found && typeof marchProp.value === "boolean") {
+    draftGlobal.marchSound = marchProp.value;
+    recognized++;
+  }
+  const volsRaw = asPlainRecord((soundObj ? readProp(soundObj, "volumes", "Volumes") : readProp(root, "volumes", "Volumes")).value);
+  if (volsRaw) {
+    for (const key of SFX_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(volsRaw, key) && Number.isFinite(Number(volsRaw[key]))) {
+        draftGlobal.volumes[key] = Number(volsRaw[key]);
+        recognized++;
+      }
+    }
+  }
+  const speedProp = gameObj ? readProp(gameObj, "speed", "Speed") : readProp(root, "speed", "speedMultiplier", "SpeedMultiplier");
+  if (speedProp.found && Number.isFinite(Number(speedProp.value))) {
+    draftGlobal.speed = Number(speedProp.value);
+    recognized++;
+  }
+  const bmProp = gameObj ? readProp(gameObj, "battleMode", "BattleMode") : readProp(root, "battleMode", "BattleMode");
+  if (bmProp.found) {
+    const bm = parseBattleModeValue(bmProp.value);
+    if (bm) {
+      draftGlobal.battleMode = bm;
+      recognized++;
+    }
+  }
+  const capProp = gameObj ? readProp(gameObj, "maxTroops", "MaxTroops", "maxTroopsCap", "MaxTroopsCap") : readProp(root, "maxTroops", "maxTroopsCap", "MaxTroopsCap");
+  if (capProp.found && Number.isFinite(Number(capProp.value))) {
+    draftGlobal.maxTroops = Number(capProp.value);
+    recognized++;
+  }
+  const roadsProp = gameObj ? readProp(gameObj, "openRoads", "OpenRoads") : readProp(root, "openRoads", "OpenRoads");
+  if (roadsProp.found && typeof roadsProp.value === "boolean") {
+    draftGlobal.openRoads = roadsProp.value;
+    recognized++;
+  }
+  const distProp = gameObj ? readProp(gameObj, "minCastleDistance", "MinCastleDistance") : readProp(root, "minCastleDistance", "MinCastleDistance");
+  if (distProp.found && Number.isFinite(Number(distProp.value))) {
+    draftGlobal.minCastleDistance = Number(distProp.value);
+    recognized++;
+  }
+  if (unitsObj) {
+    for (const type of TROOP_TYPES) {
+      const capType = type[0].toUpperCase() + type.slice(1);
+      const sub = asPlainRecord(readProp(unitsObj, type, capType).value);
+      const pProp = sub ? readProp(sub, "power", "Power") : readProp(unitsObj, `${type}Power`, `${capType}Power`);
+      const sProp = sub ? readProp(sub, "speed", "Speed") : readProp(unitsObj, `${type}Speed`, `${capType}Speed`);
+      if (pProp.found && Number.isFinite(Number(pProp.value))) {
+        draftGlobal.unitTuning[type].power = Number(pProp.value);
+        recognized++;
+      }
+      if (sProp.found && Number.isFinite(Number(sProp.value))) {
+        draftGlobal.unitTuning[type].speed = Number(sProp.value);
+        recognized++;
+      }
+    }
+  }
+  const haloProp = visObj ? readProp(visObj, "haloSpin", "HaloSpin") : readProp(root, "haloSpin", "HaloSpin");
+  if (haloProp.found && Number.isFinite(Number(haloProp.value))) {
+    draftGlobal.haloSpin = Number(haloProp.value);
+    recognized++;
+  }
+  const dashProp = visObj ? readProp(visObj, "attackDash", "AttackDash") : readProp(root, "attackDash", "AttackDash");
+  if (dashProp.found && Number.isFinite(Number(dashProp.value))) {
+    draftGlobal.attackDash = Number(dashProp.value);
+    recognized++;
+  }
+  const mapSource = nestedMapObj ?? root;
+  const mapNumKeys = [
+    ["players", "Players"],
+    ["normal", "Normal"],
+    ["fast", "Fast"],
+    ["heavy", "Heavy"],
+    ["towers", "Towers"],
+    ["lakes", "Lakes"],
+    ["ships", "Ships"],
+    ["boats", "Boats"],
+    ["minDistance", "MinDistance"]
+  ];
+  let touchedMap = false;
+  for (const [camel, pascal] of mapNumKeys) {
+    const p = readProp(mapSource, camel, pascal);
+    if (p.found && Number.isFinite(Number(p.value))) {
+      draftMap[camel] = Number(p.value);
+      recognized++;
+      touchedMap = true;
+    }
+  }
+  const largeProp = readProp(mapSource, "largeMap", "LargeMap");
+  if (largeProp.found && typeof largeProp.value === "boolean") {
+    draftMap.largeMap = largeProp.value;
+    recognized++;
+    touchedMap = true;
+  }
+  const randRoadsProp = readProp(mapSource, "randomRoads", "RandomRoads");
+  if (randRoadsProp.found && typeof randRoadsProp.value === "boolean") {
+    draftMap.randomRoads = randRoadsProp.value;
+    recognized++;
+    touchedMap = true;
+  }
+  if (recognized === 0) {
+    return { ok: false, error: "هیچ تنظیم شناخته‌شده‌ای در این کد یا فایل پیدا نشد." };
+  }
+  const nextMap = normalizeRandomMap(draftMap);
+  if (touchedMap) {
+    const mapErr = validateRandomMap(nextMap);
+    if (mapErr) return { ok: false, error: mapErr };
+  }
+  const nextGlobal = normalizeGlobalSettings(draftGlobal);
+  return {
+    ok: true,
+    save: {
+      ...nextGlobal,
+      unlocked: base.unlocked,
+      done: [...base.done],
+      customMap: nextMap
+    }
+  };
+}
+async function copyTextToClipboard(text) {
+  try {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+  }
+  if (typeof document === "undefined") return false;
+  try {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "true");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    area.style.pointerEvents = "none";
+    area.style.left = "-9999px";
+    document.body.appendChild(area);
+    area.focus();
+    area.select();
+    area.setSelectionRange(0, text.length);
+    const ok = document.execCommand("copy");
+    document.body.removeChild(area);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+function downloadJsonFile(text, filename = SETTINGS_FILE_NAME) {
+  if (typeof document === "undefined" || typeof Blob === "undefined" || typeof URL === "undefined") return false;
+  try {
+    const blob = new Blob([text], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename || SETTINGS_FILE_NAME;
+    link.style.display = "none";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // scripts/blazor-battle.ts
 var sessions = /* @__PURE__ */ new WeakMap();
 var globalKey = "castle_blazor9_settings_v2";
@@ -3538,6 +3995,17 @@ var defaultSettings = {
   ambientSound: true,
   marchSound: true
 };
+function extractUnitTuning(raw) {
+  const t = raw && typeof raw === "object" ? raw : {};
+  const normal = t.normal && typeof t.normal === "object" ? t.normal : {};
+  const fast = t.fast && typeof t.fast === "object" ? t.fast : {};
+  const heavy = t.heavy && typeof t.heavy === "object" ? t.heavy : {};
+  return normalizeUnitTuning({
+    normal: { power: t.normalPower ?? normal.power, speed: t.normalSpeed ?? normal.speed },
+    fast: { power: t.fastPower ?? fast.power, speed: t.fastSpeed ?? fast.speed },
+    heavy: { power: t.heavyPower ?? heavy.power, speed: t.heavySpeed ?? heavy.speed }
+  });
+}
 function normalize(input) {
   const settings = { ...defaultSettings, ...input };
   const cap = Number(settings.maxTroopsCap);
@@ -3553,12 +4021,15 @@ function normalize(input) {
   settings.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 30;
   settings.ambientSound = settings.ambientSound !== false;
   settings.marchSound = settings.marchSound !== false;
-  const t = settings.troopTuning ?? {};
-  settings.troopTuning = normalizeUnitTuning({
-    normal: { power: t.normalPower, speed: t.normalSpeed },
-    fast: { power: t.fastPower, speed: t.fastSpeed },
-    heavy: { power: t.heavyPower, speed: t.heavySpeed }
-  });
+  const tuned = extractUnitTuning(settings.troopTuning);
+  settings.troopTuning = {
+    normalPower: tuned.normal.power,
+    normalSpeed: tuned.normal.speed,
+    fastPower: tuned.fast.power,
+    fastSpeed: tuned.fast.speed,
+    heavyPower: tuned.heavy.power,
+    heavySpeed: tuned.heavy.speed
+  };
   settings.haloSpin = normalizeHaloSpin(settings.haloSpin);
   settings.attackDash = normalizeAttackDash(settings.attackDash);
   const vols = settings.volumes && typeof settings.volumes === "object" ? settings.volumes : {};
@@ -3607,6 +4078,74 @@ function saveSettings(input) {
   const value = normalize(input);
   saveGlobalSettings(value);
   saveMapSettings(value.customMap);
+}
+function blazorToSave(input) {
+  const s = normalize(input);
+  const done = Array.from({ length: 30 }, (_, idx) => s.completedLevels.includes(idx));
+  const volumes2 = Object.fromEntries(
+    SFX_KEYS.map((key) => [key, Number.isFinite(Number(s.volumes?.[key])) ? Number(s.volumes[key]) : 1])
+  );
+  const global = normalizeGlobalSettings({
+    unlocked: s.unlockedLevel,
+    done,
+    snd: s.soundEnabled,
+    speed: s.speedMultiplier,
+    battleMode: s.battleMode === 1 ? "castle" : "field",
+    maxTroops: s.maxTroopsCap,
+    openRoads: s.openRoads,
+    minCastleDistance: s.minCastleDistance,
+    ambientSound: s.ambientSound,
+    marchSound: s.marchSound,
+    unitTuning: extractUnitTuning(s.troopTuning),
+    haloSpin: s.haloSpin ?? void 0,
+    attackDash: s.attackDash ?? void 0,
+    volumes: volumes2
+  });
+  return { ...global, customMap: normalizeRandomMap(s.customMap) };
+}
+function saveToBlazor(save, current) {
+  const prev = normalize(current ?? null);
+  return normalize({
+    unlockedLevel: prev.unlockedLevel,
+    completedLevels: [...prev.completedLevels],
+    soundEnabled: save.snd,
+    speedMultiplier: save.speed,
+    battleMode: save.battleMode === "castle" ? 1 : 0,
+    maxTroopsCap: save.maxTroops,
+    customMap: save.customMap,
+    openRoads: save.openRoads,
+    minCastleDistance: save.minCastleDistance,
+    randomRoads: save.customMap.randomRoads,
+    ambientSound: save.ambientSound,
+    marchSound: save.marchSound,
+    troopTuning: {
+      normalPower: save.unitTuning.normal.power,
+      normalSpeed: save.unitTuning.normal.speed,
+      fastPower: save.unitTuning.fast.power,
+      fastSpeed: save.unitTuning.fast.speed,
+      heavyPower: save.unitTuning.heavy.power,
+      heavySpeed: save.unitTuning.heavy.speed
+    },
+    haloSpin: save.haloSpin,
+    attackDash: save.attackDash,
+    volumes: { ...save.volumes }
+  });
+}
+function exportPortableSettings(input) {
+  return exportSettingsJson(blazorToSave(input));
+}
+function importPortableSettings(json, current) {
+  const result = importSettingsJson(json, blazorToSave(current ?? null));
+  if (!result.ok) return { ok: false, settings: null, error: result.error };
+  const settings = saveToBlazor(result.save, current);
+  saveSettings(settings);
+  return { ok: true, settings, error: null };
+}
+function copySettingsText(text) {
+  return copyTextToClipboard(text);
+}
+function downloadSettingsFile(text, filename = SETTINGS_FILE_NAME) {
+  return downloadJsonFile(text, filename);
 }
 function snapshot(s) {
   const g = s.game;
@@ -3670,7 +4209,7 @@ function applyRules(s) {
     minRoadLength: s.settings.minCastleDistance * PX_PER_METER,
     randomRoads: s.settings.customMap.randomRoads
   });
-  applyUnitTuning(s.settings.troopTuning);
+  applyUnitTuning(extractUnitTuning(s.settings.troopTuning));
   g.haloSpin = normalizeHaloSpin(s.settings.haloSpin);
   g.attackDash = normalizeAttackDash(s.settings.attackDash);
   g.hudInset = readHudInset(s.canvas);
@@ -3680,7 +4219,7 @@ function applyRules(s) {
 }
 function newGame(s, index, demo, levelOverride) {
   const percent = s.game?.pct ?? 60;
-  applyUnitTuning(s.settings.troopTuning);
+  applyUnitTuning(extractUnitTuning(s.settings.troopTuning));
   s.game = new Game(index, demo, levelOverride);
   s.game.pct = percent;
   s.win = null;
@@ -3911,11 +4450,17 @@ function dispose(canvas) {
 }
 export {
   applySettings,
+  blazorToSave,
   command,
+  copySettingsText,
   dispose,
+  downloadSettingsFile,
+  exportPortableSettings,
+  importPortableSettings,
   initialize,
   loadSettings,
   saveGlobalSettings,
   saveMapSettings,
-  saveSettings
+  saveSettings,
+  saveToBlazor
 };

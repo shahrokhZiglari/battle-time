@@ -1,8 +1,17 @@
-import { applyUnitTuning, COL, LEVELS, normalizeAttackDash, normalizeHaloSpin, normalizeUnitTuning } from "../src/game/config";
+import { applyUnitTuning, COL, LEVELS, normalizeAttackDash, normalizeHaloSpin, normalizeUnitTuning, type UnitTuningMap } from "../src/game/config";
 import { Game } from "../src/game/engine";
 import { render } from "../src/game/render";
-import { setNatureLayers, setSfxVolumes, setSound, sfx } from "../src/game/sound";
+import { setNatureLayers, setSfxVolumes, setSound, sfx, SFX_KEYS, type SfxKey } from "../src/game/sound";
 import { createRandomLevel, DEFAULT_RANDOM_MAP, normalizeRandomMap, validateRandomMap, PX_PER_METER, type RandomMapSettings } from "../src/game/map";
+import {
+  copyTextToClipboard,
+  downloadJsonFile,
+  exportSettingsJson,
+  importSettingsJson,
+  normalizeGlobalSettings,
+  SETTINGS_FILE_NAME,
+  type Save,
+} from "../src/game/save";
 
 interface Settings {
   unlockedLevel: number;
@@ -79,6 +88,18 @@ const defaultSettings: Settings = {
   marchSound: true,
 };
 
+function extractUnitTuning(raw: unknown): UnitTuningMap {
+  const t = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const normal = (t.normal && typeof t.normal === "object" ? t.normal : {}) as Record<string, unknown>;
+  const fast = (t.fast && typeof t.fast === "object" ? t.fast : {}) as Record<string, unknown>;
+  const heavy = (t.heavy && typeof t.heavy === "object" ? t.heavy : {}) as Record<string, unknown>;
+  return normalizeUnitTuning({
+    normal: { power: (t.normalPower ?? normal.power) as number, speed: (t.normalSpeed ?? normal.speed) as number },
+    fast: { power: (t.fastPower ?? fast.power) as number, speed: (t.fastSpeed ?? fast.speed) as number },
+    heavy: { power: (t.heavyPower ?? heavy.power) as number, speed: (t.heavySpeed ?? heavy.speed) as number },
+  });
+}
+
 function normalize(input: Partial<Settings> | null): Settings {
   const settings = { ...defaultSettings, ...input };
   const cap = Number(settings.maxTroopsCap);
@@ -96,12 +117,15 @@ function normalize(input: Partial<Settings> | null): Settings {
   settings.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 30;
   settings.ambientSound = settings.ambientSound !== false;
   settings.marchSound = settings.marchSound !== false;
-  const t = settings.troopTuning ?? {};
-  settings.troopTuning = normalizeUnitTuning({
-    normal: { power: t.normalPower, speed: t.normalSpeed },
-    fast: { power: t.fastPower, speed: t.fastSpeed },
-    heavy: { power: t.heavyPower, speed: t.heavySpeed },
-  });
+  const tuned = extractUnitTuning(settings.troopTuning);
+  settings.troopTuning = {
+    normalPower: tuned.normal.power,
+    normalSpeed: tuned.normal.speed,
+    fastPower: tuned.fast.power,
+    fastSpeed: tuned.fast.speed,
+    heavyPower: tuned.heavy.power,
+    heavySpeed: tuned.heavy.speed,
+  };
   settings.haloSpin = normalizeHaloSpin(settings.haloSpin);
   settings.attackDash = normalizeAttackDash(settings.attackDash);
   // بلندیِ صداها: هر کلیدِ ناشناس دور ریخته می‌شود و مقدارها در بازهٔ ۰..۱ می‌مانند
@@ -157,6 +181,86 @@ export function saveSettings(input: Settings) {
   const value = normalize(input);
   saveGlobalSettings(value);
   saveMapSettings(value.customMap);
+}
+
+/** تبدیلِ تنظیماتِ Blazor به مدلِ یکپارچهٔ وب برای خروجیِ مشترک */
+export function blazorToSave(input: Partial<Settings> | null): Save {
+  const s = normalize(input);
+  const done = Array.from({ length: 30 }, (_, idx) => s.completedLevels.includes(idx));
+  const volumes = Object.fromEntries(
+    SFX_KEYS.map((key) => [key, Number.isFinite(Number(s.volumes?.[key])) ? Number(s.volumes![key]) : 1]),
+  ) as Record<SfxKey, number>;
+  const global = normalizeGlobalSettings({
+    unlocked: s.unlockedLevel,
+    done,
+    snd: s.soundEnabled,
+    speed: s.speedMultiplier,
+    battleMode: s.battleMode === 1 ? "castle" : "field",
+    maxTroops: s.maxTroopsCap,
+    openRoads: s.openRoads,
+    minCastleDistance: s.minCastleDistance,
+    ambientSound: s.ambientSound,
+    marchSound: s.marchSound,
+    unitTuning: extractUnitTuning(s.troopTuning),
+    haloSpin: s.haloSpin ?? undefined,
+    attackDash: s.attackDash ?? undefined,
+    volumes,
+  });
+  return { ...global, customMap: normalizeRandomMap(s.customMap) };
+}
+
+/** تبدیلِ مدلِ یکپارچه به ساختارِ تنظیماتِ Blazor (با حفظِ پیشرفتِ مراحل) */
+export function saveToBlazor(save: Save, current?: Partial<Settings> | null): Settings {
+  const prev = normalize(current ?? null);
+  return normalize({
+    unlockedLevel: prev.unlockedLevel,
+    completedLevels: [...prev.completedLevels],
+    soundEnabled: save.snd,
+    speedMultiplier: save.speed,
+    battleMode: save.battleMode === "castle" ? 1 : 0,
+    maxTroopsCap: save.maxTroops,
+    customMap: save.customMap,
+    openRoads: save.openRoads,
+    minCastleDistance: save.minCastleDistance,
+    randomRoads: save.customMap.randomRoads,
+    ambientSound: save.ambientSound,
+    marchSound: save.marchSound,
+    troopTuning: {
+      normalPower: save.unitTuning.normal.power,
+      normalSpeed: save.unitTuning.normal.speed,
+      fastPower: save.unitTuning.fast.power,
+      fastSpeed: save.unitTuning.fast.speed,
+      heavyPower: save.unitTuning.heavy.power,
+      heavySpeed: save.unitTuning.heavy.speed,
+    },
+    haloSpin: save.haloSpin,
+    attackDash: save.attackDash,
+    volumes: { ...save.volumes },
+  });
+}
+
+/** خروجیِ استاندارد JSON از تنظیماتِ Blazor (کاملاً سازگار با نسخهٔ وب و آفلاین) */
+export function exportPortableSettings(input: Partial<Settings> | null): string {
+  return exportSettingsJson(blazorToSave(input));
+}
+
+/** خواندنِ JSON تنظیمات از هر نسخه و تبدیل به مدلِ Blazor */
+export function importPortableSettings(json: string, current?: Partial<Settings> | null) {
+  const result = importSettingsJson(json, blazorToSave(current ?? null));
+  if (!result.ok) return { ok: false, settings: null, error: result.error };
+  const settings = saveToBlazor(result.save, current);
+  saveSettings(settings);
+  return { ok: true, settings, error: null };
+}
+
+/** کپیِ متنِ تنظیمات در حافظهٔ مرورگر از سمتِ Blazor */
+export function copySettingsText(text: string): Promise<boolean> {
+  return copyTextToClipboard(text);
+}
+
+/** دانلودِ مستقیمِ فایلِ تنظیمات در مرورگر از سمتِ Blazor */
+export function downloadSettingsFile(text: string, filename = SETTINGS_FILE_NAME): boolean {
+  return downloadJsonFile(text, filename);
 }
 
 function snapshot(s: Session) {
@@ -226,7 +330,7 @@ function applyRules(s: Session) {
     minRoadLength: s.settings.minCastleDistance * PX_PER_METER,
     randomRoads: s.settings.customMap.randomRoads,
   });
-  applyUnitTuning(s.settings.troopTuning);
+  applyUnitTuning(extractUnitTuning(s.settings.troopTuning));
   g.haloSpin = normalizeHaloSpin(s.settings.haloSpin);
   g.attackDash = normalizeAttackDash(s.settings.attackDash);
   g.hudInset = readHudInset(s.canvas);
@@ -238,7 +342,7 @@ function applyRules(s: Session) {
 function newGame(s: Session, index: number, demo: boolean, levelOverride?: typeof LEVELS[number]) {
   const percent = s.game?.pct ?? 60;
   // تنظیماتِ نیروها باید پیش از ساختِ ارتش‌های اولیه اعمال شود.
-  applyUnitTuning(s.settings.troopTuning);
+  applyUnitTuning(extractUnitTuning(s.settings.troopTuning));
   s.game = new Game(index, demo, levelOverride);
   s.game.pct = percent;
   s.win = null;

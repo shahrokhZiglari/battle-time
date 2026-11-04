@@ -19,7 +19,19 @@ public sealed class CastleGameService
         next.CustomMap.Fast = Math.Clamp(next.CustomMap.Fast, 0, 50);
         next.CustomMap.Heavy = Math.Clamp(next.CustomMap.Heavy, 0, 50);
         next.CustomMap.Towers = Math.Clamp(next.CustomMap.Towers, 0, 50);
+        next.CustomMap.Lakes = Math.Clamp(next.CustomMap.Lakes, 0, 16);
+        next.CustomMap.Ships = Math.Clamp(next.CustomMap.Ships, 0, 12);
+        next.CustomMap.Boats = Math.Clamp(next.CustomMap.Boats, 0, 16);
         next.CustomMap.MinDistance = Math.Clamp(next.CustomMap.MinDistance, 0, 120);
+        next.HaloSpin = Math.Clamp(next.HaloSpin, 0, 3);
+        next.AttackDash = Math.Clamp(next.AttackDash, 0, 1);
+        next.TroopTuning ??= new UnitTuningSettings();
+        next.TroopTuning.NormalPower = Math.Clamp(next.TroopTuning.NormalPower, 0.5, 4);
+        next.TroopTuning.NormalSpeed = Math.Clamp(next.TroopTuning.NormalSpeed, 0.4, 2.5);
+        next.TroopTuning.FastPower = Math.Clamp(next.TroopTuning.FastPower, 0.5, 4);
+        next.TroopTuning.FastSpeed = Math.Clamp(next.TroopTuning.FastSpeed, 0.4, 2.5);
+        next.TroopTuning.HeavyPower = Math.Clamp(next.TroopTuning.HeavyPower, 0.5, 4);
+        next.TroopTuning.HeavySpeed = Math.Clamp(next.TroopTuning.HeavySpeed, 0.4, 2.5);
         if (!Enum.IsDefined(next.BattleMode)) next.BattleMode = BattleMode.Field;
         Settings = next;
     }
