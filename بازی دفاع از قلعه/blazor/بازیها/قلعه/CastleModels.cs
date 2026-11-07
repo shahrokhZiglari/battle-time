@@ -20,15 +20,13 @@ public sealed class RandomMapSettings
     public int Boats { get; set; } = 3;
     public bool LargeMap { get; set; } = true;
     /// <summary>حداقل فاصلهٔ دو قلعهٔ همسایه، به متر</summary>
-    public int MinDistance { get; set; } = 30;
-    /// <summary>راه‌ها کاملاً رندوم ساخته شوند</summary>
-    public bool RandomRoads { get; set; }
+    public int MinDistance { get; set; } = 10;
 
     public RandomMapSettings Copy() => new()
     {
         Players = Players, Normal = Normal, Fast = Fast, Heavy = Heavy, Towers = Towers,
         Lakes = Lakes, Ships = Ships, Boats = Boats,
-        LargeMap = LargeMap, MinDistance = MinDistance, RandomRoads = RandomRoads
+        LargeMap = LargeMap, MinDistance = MinDistance
     };
 }
 
@@ -44,7 +42,7 @@ public sealed class CastleSettings
     /// <summary>Every castle can reach every other castle.</summary>
     public bool OpenRoads { get; set; } = true;
     /// <summary>حداقل فاصلهٔ دو قلعهٔ همسایه، به متر</summary>
-    public int MinCastleDistance { get; set; } = 30;
+    public int MinCastleDistance { get; set; } = 10;
     /// <summary>Calm nature ambience.</summary>
     public bool AmbientSound { get; set; } = true;
     /// <summary>Marching sound while troops travel.</summary>
@@ -58,17 +56,19 @@ public sealed class CastleSettings
     /// <summary>بلندیِ تک‌تکِ صداها و افکت‌ها (۰ تا ۱) — هر کلید یک اسلایدر در تنظیمات</summary>
     public Dictionary<string, double> Volumes { get; set; } = DefaultVolumes();
 
-    /// <summary>کلیدهای صدا با مقدارِ کامل — هم‌ارز SFX_KEYS در موتور جاوااسکریپت</summary>
+    /// <summary>کلیدهای صدا با مقدارِ پیش‌فرض (فتح = ۱۰٪، سایر صداها = ۱۰۰٪)</summary>
     public static Dictionary<string, double> DefaultVolumes() => new(StringComparer.Ordinal)
     {
-        ["ambient"] = 1, ["march"] = 1, ["capture"] = 1,
+        ["ambient"] = 1, ["march"] = 1, ["capture"] = 0.1,
         ["select"] = 1, ["deselect"] = 1, ["send"] = 1, ["lose"] = 1, ["repel"] = 1, ["upgrade"] = 1,
         ["shot"] = 1, ["clash"] = 1, ["win"] = 1, ["defeat"] = 1, ["start"] = 1, ["hover"] = 1,
     };
 
-    /// <summary>بلندیِ یک صدا (کلیدِ ناشناس = ۱۰۰٪)</summary>
+    /// <summary>بلندیِ یک صدا (کلیدِ ناشناس = پیش‌فرضِ همان کلید)</summary>
     public double VolumeOf(string key) =>
-        Volumes is not null && Volumes.TryGetValue(key, out var v) ? Math.Clamp(v, 0, 1) : 1;
+        Volumes is not null && Volumes.TryGetValue(key, out var v)
+            ? Math.Clamp(v, 0, 1)
+            : (key == "capture" ? 0.1 : 1);
 
     public void SetVolume(string key, double value)
     {
@@ -185,7 +185,7 @@ public static class CastleSettingsTransfer
     private sealed record PortableVisualsDto(double HaloSpin, double AttackDash);
     private sealed record PortableMapDto(
         int Players, int Normal, int Fast, int Heavy, int Towers,
-        int Lakes, int Ships, int Boats, bool LargeMap, int MinDistance, bool RandomRoads);
+        int Lakes, int Ships, int Boats, bool LargeMap, int MinDistance);
     private sealed record PortableDocumentDto(
         [property: JsonPropertyName("format")] string Format,
         [property: JsonPropertyName("version")] int Version,
@@ -235,8 +235,7 @@ public static class CastleSettingsTransfer
                 Math.Clamp(m.Ships, 0, 12),
                 Math.Clamp(m.Boats, 0, 16),
                 m.LargeMap,
-                Math.Clamp(m.MinDistance, 0, 120),
-                m.RandomRoads));
+                Math.Clamp(m.MinDistance, 0, 120)));
 
         return JsonSerializer.Serialize(doc, WriteOptions);
     }
@@ -379,7 +378,6 @@ public static class CastleSettingsTransfer
             if (TryGetNumber(mapSrc, out var boats, "boats", "Boats")) { draft.CustomMap.Boats = Math.Clamp((int)Math.Floor(boats), 0, 16); recognized++; touchedMap = true; }
             if (TryGetNumber(mapSrc, out var minDist, "minDistance", "MinDistance")) { draft.CustomMap.MinDistance = Math.Clamp((int)Math.Floor(minDist), 0, 120); recognized++; touchedMap = true; }
             if (TryGetBool(mapSrc, out var largeMap, "largeMap", "LargeMap")) { draft.CustomMap.LargeMap = largeMap; recognized++; touchedMap = true; }
-            if (TryGetBool(mapSrc, out var randRoads, "randomRoads", "RandomRoads")) { draft.CustomMap.RandomRoads = randRoads; recognized++; touchedMap = true; }
 
             if (recognized == 0)
             {

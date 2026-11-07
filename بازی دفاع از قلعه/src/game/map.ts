@@ -15,8 +15,6 @@ export interface RandomMapSettings {
   largeMap: boolean;
   /** حداقل فاصلهٔ دو قلعهٔ همسایه، به متر */
   minDistance: number;
-  /** راه‌ها کاملاً رندوم ساخته شوند */
-  randomRoads: boolean;
 }
 
 export const DEFAULT_RANDOM_MAP: RandomMapSettings = {
@@ -29,8 +27,7 @@ export const DEFAULT_RANDOM_MAP: RandomMapSettings = {
   ships: 2,
   boats: 3,
   largeMap: true,
-  minDistance: 30,
-  randomRoads: false,
+  minDistance: 10,
 };
 
 /** هر متر در فضای جهان بازی برابر چند پیکسل است (۱ متر ≈ ۶ پیکسل). */
@@ -57,7 +54,6 @@ export function normalizeRandomMap(input?: Partial<RandomMapSettings> | null): R
     boats: whole(source.boats, 0, MAX_BOATS),
     largeMap: source.largeMap !== false,
     minDistance: whole(source.minDistance, 0, 120),
-    randomRoads: source.randomRoads === true,
   };
 }
 

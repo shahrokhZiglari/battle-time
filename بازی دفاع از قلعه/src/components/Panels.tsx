@@ -20,7 +20,7 @@ import {
   Save,
   SETTINGS_FILE_NAME,
 } from "../game/save";
-import { SFX_KEYS, SFX_FULL_NAMES, SFX_LABELS, type SfxKey } from "../game/sound";
+import { DEFAULT_SFX_VOLUMES, SFX_KEYS, SFX_FULL_NAMES, SFX_LABELS, type SfxKey } from "../game/sound";
 import GestureDemo from "./GestureDemo";
 import { RotateRow } from "./RotateControl";
 import type { Rotation } from "../game/view";
@@ -755,7 +755,7 @@ export function SettingsPanel({
         >
           <div className="grid grid-cols-2 gap-x-1.5 gap-y-0">
             {SFX_KEYS.map((key, index) => {
-              const v = Math.max(0, Math.min(1, Number(save.volumes?.[key] ?? 1)));
+              const v = Math.max(0, Math.min(1, Number(save.volumes?.[key] ?? DEFAULT_SFX_VOLUMES[key])));
               // ردیفِ آخر (تعدادِ فرد) دو ستون را می‌گیرد تا هیچ خانهٔ خالیِ
               // بی‌دلیلی در پایینِ کارت نماند.
               const span = index === SFX_KEYS.length - 1 && SFX_KEYS.length % 2 === 1;
@@ -1141,7 +1141,6 @@ export function RandomMapPanel({
             </div>
           </div>
           <Toggle label="نقشهٔ بزرگ (زوم)" icon="🔍" checked={settings.largeMap} onChange={(v) => set({ largeMap: v })} />
-          <Toggle label="راه‌های رندوم" icon="🛤" checked={settings.randomRoads} onChange={(v) => set({ randomRoads: v })} />
           <div className="flex items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-2">
             <span className="min-w-0 truncate text-[13px] text-ash">حداقل فاصلهٔ قلعه‌ها</span>
             <span className="flex shrink-0 items-center gap-1">

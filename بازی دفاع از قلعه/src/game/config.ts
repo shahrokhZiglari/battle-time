@@ -46,7 +46,7 @@ export interface Squad {
 }
 
 export interface Effect {
-  k: "txt" | "ring" | "burst";
+  k: "txt" | "ring" | "burst" | "capture";
   x: number;
   y: number;
   s?: string;

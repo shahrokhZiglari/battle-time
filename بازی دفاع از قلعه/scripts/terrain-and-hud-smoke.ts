@@ -62,7 +62,7 @@ import { CFG } from "../src/game/config";
 
 /* ---------- ۵) اعتبارسنجیِ محدودهٔ خلیج ---------- */
 {
-  assert.ok(validateRandomMap({ players: 2, normal: 5, fast: 0, heavy: 0, towers: 0, largeMap: true, minDistance: 30, randomRoads: false, lakes: MAX_LAKES + 1 }));
+  assert.ok(validateRandomMap({ players: 2, normal: 5, fast: 0, heavy: 0, towers: 0, largeMap: true, minDistance: 10, lakes: MAX_LAKES + 1, ships: 2, boats: 3 }));
   assert.equal(normalizeRandomMap({ lakes: -3 }).lakes, 0);
   assert.equal(normalizeRandomMap({ lakes: 99 }).lakes, MAX_LAKES);
 }

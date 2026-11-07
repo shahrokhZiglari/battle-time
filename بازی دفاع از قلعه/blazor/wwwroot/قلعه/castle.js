@@ -376,35 +376,6 @@ function stopMarch() {
   marchGain = null;
   marchOn = false;
 }
-function playCaptureSound() {
-  const a = audio();
-  if (!a || !master) return;
-  const now = a.currentTime;
-  const notes = [392, 523, 659, 784];
-  notes.forEach((freq, i) => {
-    const osc = a.createOscillator();
-    const g = a.createGain();
-    const t = now + i * 0.085;
-    osc.type = "triangle";
-    osc.frequency.setValueAtTime(freq, t);
-    g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(0.16, t + 0.02);
-    g.gain.exponentialRampToValueAtTime(8e-4, t + 0.5);
-    osc.connect(g).connect(master);
-    osc.start(t);
-    osc.stop(t + 0.55);
-  });
-  const boom = a.createOscillator();
-  const bg = a.createGain();
-  boom.type = "sine";
-  boom.frequency.setValueAtTime(160, now);
-  boom.frequency.exponentialRampToValueAtTime(42, now + 0.32);
-  bg.gain.setValueAtTime(0.18, now);
-  bg.gain.exponentialRampToValueAtTime(8e-4, now + 0.42);
-  boom.connect(bg).connect(master);
-  boom.start(now);
-  boom.stop(now + 0.45);
-}
 function stopAllNature() {
   stopAmbient();
   stopMarch();
@@ -428,16 +399,19 @@ var SFX_KEYS = [
   "start",
   "hover"
 ];
-var volumes = {};
+var DEFAULT_SFX_VOLUMES = Object.fromEntries(
+  SFX_KEYS.map((k) => [k, k === "capture" ? 0.1 : 1])
+);
+var volumes = { ...DEFAULT_SFX_VOLUMES };
 function setSfxVolumes(next) {
   for (const key of SFX_KEYS) {
     const raw = next?.[key];
-    volumes[key] = Number.isFinite(Number(raw)) ? Math.max(0, Math.min(1, Number(raw))) : 1;
+    volumes[key] = Number.isFinite(Number(raw)) ? Math.max(0, Math.min(1, Number(raw))) : DEFAULT_SFX_VOLUMES[key];
   }
-  setNatureVolume("ambient", volumes.ambient ?? 1);
-  setNatureVolume("march", volumes.march ?? 1);
+  setNatureVolume("ambient", volumes.ambient ?? DEFAULT_SFX_VOLUMES.ambient);
+  setNatureVolume("march", volumes.march ?? DEFAULT_SFX_VOLUMES.march);
 }
-var vol = (key) => key ? volumes[key] ?? 1 : 1;
+var vol = (key) => key ? volumes[key] ?? DEFAULT_SFX_VOLUMES[key] : 1;
 var ac2 = null;
 var enabled = true;
 var setSound = (v) => {
@@ -498,73 +472,6 @@ function sweep(f0, f1, d = 0.18, t = "triangle", v = 0.05, key) {
   }
 }
 var jingle = (a, key) => a.forEach((f, i) => setTimeout(() => beep(f, 0.2, "triangle", 0.06, key), i * 125));
-function brass(ctxA, freq, at, dur, vol2, cut = 2600, dest, vibrato = 6e-3) {
-  const now = ctxA.currentTime;
-  const filter = ctxA.createBiquadFilter();
-  filter.type = "lowpass";
-  filter.frequency.setValueAtTime(500, now + at);
-  filter.frequency.exponentialRampToValueAtTime(cut, now + at + 0.05);
-  filter.frequency.exponentialRampToValueAtTime(cut * 0.72, now + at + dur);
-  filter.Q.value = 1.4;
-  const g = ctxA.createGain();
-  g.gain.setValueAtTime(1e-4, now + at);
-  g.gain.exponentialRampToValueAtTime(vol2, now + at + 0.02);
-  g.gain.setValueAtTime(vol2, now + at + dur * 0.78);
-  g.gain.exponentialRampToValueAtTime(6e-4, now + at + dur);
-  filter.connect(g);
-  g.connect(dest ?? ctxA.destination);
-  for (const detune of [-6, 6]) {
-    const o = ctxA.createOscillator();
-    o.type = "sawtooth";
-    o.frequency.value = freq;
-    o.detune.value = detune;
-    const lfo = ctxA.createOscillator();
-    const lfoGain = ctxA.createGain();
-    lfo.frequency.value = 5.4;
-    lfoGain.gain.value = freq * vibrato;
-    lfo.connect(lfoGain);
-    lfoGain.connect(o.frequency);
-    o.connect(filter);
-    o.start(now + at);
-    o.stop(now + at + dur + 0.06);
-    lfo.start(now + at);
-    lfo.stop(now + at + dur + 0.06);
-  }
-}
-function noiseHit(ctxA, at, dur, freq, vol2, q = 1.2, dest) {
-  const length = Math.max(1, Math.floor(ctxA.sampleRate * dur));
-  const buffer = ctxA.createBuffer(1, length, ctxA.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / length);
-  const src = ctxA.createBufferSource();
-  src.buffer = buffer;
-  const filter = ctxA.createBiquadFilter();
-  filter.type = "bandpass";
-  filter.frequency.value = freq;
-  filter.Q.value = q;
-  const g = ctxA.createGain();
-  g.gain.value = vol2;
-  src.connect(filter);
-  filter.connect(g);
-  g.connect(dest ?? ctxA.destination);
-  src.start(ctxA.currentTime + at);
-}
-function bell(ctxA, freq, at, dur, vol2, dest) {
-  const now = ctxA.currentTime;
-  for (const [mult, amp, decay] of [[1, 1, 1], [2.01, 0.42, 0.62], [3.02, 0.2, 0.4], [4.17, 0.1, 0.28]]) {
-    const o = ctxA.createOscillator();
-    const g = ctxA.createGain();
-    o.type = "sine";
-    o.frequency.value = freq * mult;
-    g.gain.setValueAtTime(1e-4, now + at);
-    g.gain.exponentialRampToValueAtTime(vol2 * amp, now + at + 6e-3);
-    g.gain.exponentialRampToValueAtTime(4e-4, now + at + dur * decay);
-    o.connect(g);
-    g.connect(dest ?? ctxA.destination);
-    o.start(now + at);
-    o.stop(now + at + dur * decay + 0.05);
-  }
-}
 function captureFanfare() {
   if (!enabled) return;
   const a = ctx();
@@ -572,47 +479,69 @@ function captureFanfare() {
   try {
     const level = vol("capture");
     if (level <= 1e-3) return;
-    const bus = a.createGain();
-    bus.gain.value = 0.72 * level;
-    const shaper = a.createWaveShaper();
-    const curve = new Float32Array(1024);
-    for (let i = 0; i < curve.length; i++) {
-      const x = i / (curve.length - 1) * 2 - 1;
-      curve[i] = Math.tanh(x * 1.6) / Math.tanh(1.6);
-    }
-    shaper.curve = curve;
-    shaper.oversample = "2x";
-    bus.connect(shaper);
-    shaper.connect(a.destination);
     const now = a.currentTime;
-    const drum = a.createOscillator();
-    const drumGain = a.createGain();
-    drum.type = "sine";
-    drum.frequency.setValueAtTime(168, now);
-    drum.frequency.exponentialRampToValueAtTime(46, now + 0.28);
-    drumGain.gain.setValueAtTime(0.34, now);
-    drumGain.gain.exponentialRampToValueAtTime(1e-3, now + 0.42);
-    drum.connect(drumGain);
-    drumGain.connect(bus);
-    drum.start();
-    drum.stop(now + 0.45);
-    noiseHit(a, 0, 0.2, 220, 0.13, 0.8, bus);
-    noiseHit(a, 0.01, 0.9, 5600, 0.045, 0.9, bus);
-    for (const [f, v] of [[130.81, 0.062], [196, 0.058], [261.63, 0.055], [329.63, 0.045], [392, 0.03]]) {
-      brass(a, f, 0, 0.5, v, 2300, bus);
+    const bus = a.createGain();
+    bus.gain.setValueAtTime(0.42 * level, now);
+    const warmFilter = a.createBiquadFilter();
+    warmFilter.type = "lowpass";
+    warmFilter.frequency.setValueAtTime(2400, now);
+    warmFilter.Q.value = 0.7;
+    bus.connect(warmFilter);
+    warmFilter.connect(a.destination);
+    const thud = a.createOscillator();
+    const thudGain = a.createGain();
+    thud.type = "sine";
+    thud.frequency.setValueAtTime(132, now);
+    thud.frequency.exponentialRampToValueAtTime(55, now + 0.18);
+    thudGain.gain.setValueAtTime(0.24, now);
+    thudGain.gain.exponentialRampToValueAtTime(8e-4, now + 0.24);
+    thud.connect(thudGain);
+    thudGain.connect(bus);
+    thud.start(now);
+    thud.stop(now + 0.26);
+    for (const [freq, amp] of [[261.63, 0.11], [392, 0.09]]) {
+      const pad = a.createOscillator();
+      const padGain = a.createGain();
+      pad.type = "triangle";
+      pad.frequency.setValueAtTime(freq, now);
+      padGain.gain.setValueAtTime(1e-4, now);
+      padGain.gain.linearRampToValueAtTime(amp, now + 0.03);
+      padGain.gain.exponentialRampToValueAtTime(8e-4, now + 0.52);
+      pad.connect(padGain);
+      padGain.connect(bus);
+      pad.start(now);
+      pad.stop(now + 0.55);
     }
-    for (const [f, at] of [[392, 0.18], [523.25, 0.33], [659.25, 0.48]]) {
-      brass(a, f, at, 0.24, 0.09, 3300, bus, 4e-3);
-      brass(a, f / 2, at, 0.24, 0.03, 1650, bus, 4e-3);
+    const notes = [
+      [392, 0, 0.28, 0.15],
+      [523.25, 0.065, 0.3, 0.16],
+      [659.25, 0.13, 0.34, 0.17],
+      [783.99, 0.195, 0.44, 0.2]
+    ];
+    for (const [freq, at, dur, amp] of notes) {
+      const osc = a.createOscillator();
+      const overtone = a.createOscillator();
+      const g = a.createGain();
+      const og = a.createGain();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(freq, now + at);
+      overtone.type = "sine";
+      overtone.frequency.setValueAtTime(freq * 2, now + at);
+      g.gain.setValueAtTime(1e-4, now + at);
+      g.gain.linearRampToValueAtTime(amp, now + at + 0.012);
+      g.gain.exponentialRampToValueAtTime(6e-4, now + at + dur);
+      og.gain.setValueAtTime(1e-4, now + at);
+      og.gain.linearRampToValueAtTime(amp * 0.28, now + at + 0.01);
+      og.gain.exponentialRampToValueAtTime(4e-4, now + at + dur * 0.7);
+      osc.connect(g);
+      overtone.connect(og);
+      g.connect(bus);
+      og.connect(bus);
+      osc.start(now + at);
+      overtone.start(now + at);
+      osc.stop(now + at + dur + 0.03);
+      overtone.stop(now + at + dur * 0.7 + 0.03);
     }
-    brass(a, 783.99, 0.64, 0.62, 0.1, 4e3, bus, 9e-3);
-    brass(a, 391.99, 0.64, 0.62, 0.045, 2200, bus, 9e-3);
-    for (const [f, v] of [[130.81, 0.05], [196, 0.045], [261.63, 0.042], [329.63, 0.036], [523.25, 0.03], [659.25, 0.024]]) {
-      brass(a, f, 0.64, 0.62, v, 2400, bus);
-    }
-    bell(a, 1046.5, 0.64, 1.15, 0.05, bus);
-    bell(a, 1567.98, 0.66, 0.95, 0.028, bus);
-    noiseHit(a, 0.64, 0.85, 7600, 0.022, 1, bus);
   } catch {
   }
 }
@@ -851,8 +780,7 @@ var DEFAULT_RANDOM_MAP = {
   ships: 2,
   boats: 3,
   largeMap: true,
-  minDistance: 30,
-  randomRoads: false
+  minDistance: 10
 };
 var PX_PER_METER = 6;
 var MAX_LAKES = 16;
@@ -871,8 +799,7 @@ function normalizeRandomMap(input) {
     ships: whole(source.ships, 0, MAX_SHIPS),
     boats: whole(source.boats, 0, MAX_BOATS),
     largeMap: source.largeMap !== false,
-    minDistance: whole(source.minDistance, 0, 120),
-    randomRoads: source.randomRoads === true
+    minDistance: whole(source.minDistance, 0, 120)
   };
 }
 function validateRandomMap(input) {
@@ -2064,10 +1991,6 @@ var Game = class {
     __publicField(this, "openRoads", true);
     /** حداقل فاصلهٔ پل بین دو قلعهٔ همسایه (پیکسل) */
     __publicField(this, "minRoadLength", 0);
-    /** اگر روشن باشد، راه‌ها کاملاً رندوم انتخاب می‌شوند. */
-    __publicField(this, "randomRoads", false);
-    /** مولد اعداد تصادفیِ قابل‌کنترل، تا نقشهٔ رندوم بازتولیدپذیر بماند. */
-    __publicField(this, "roadRandom", Math.random);
     /** تایمر کاهش هر ثانیه ۱ نیرو برای قلعه‌های فراتر از سقف */
     __publicField(this, "decayTimer", 0);
     __publicField(this, "shake", 0);
@@ -2177,12 +2100,7 @@ var Game = class {
     for (const [a, b, d] of pairs) {
       if (d < minLength) continue;
       if (this.links.length >= linkCap) break;
-      if (this.randomRoads) {
-        if (this.roadRandom() < 0.3 && this.links.length < linkCap) {
-          this.links.push([a, b]);
-          u[f(a)] = f(b);
-        }
-      } else if (f(a) !== f(b)) {
+      if (f(a) !== f(b)) {
         u[f(a)] = f(b);
         this.links.push([a, b]);
       } else if (!this.largeMap && d < 300) {
@@ -2262,11 +2180,10 @@ var Game = class {
    * زده می‌شد و هر تغییرِ تنظیمات کلِ نبرد را از صفر می‌کرد.)
    */
   setRoadRules(options) {
-    const before = { openRoads: this.openRoads, minRoadLength: this.minRoadLength, randomRoads: this.randomRoads };
+    const before = { openRoads: this.openRoads, minRoadLength: this.minRoadLength };
     if (options.openRoads !== void 0) this.openRoads = options.openRoads;
     if (options.minRoadLength !== void 0) this.minRoadLength = Math.max(0, Math.min(900, Math.floor(options.minRoadLength)));
-    if (options.randomRoads !== void 0) this.randomRoads = options.randomRoads;
-    const changed = before.openRoads !== this.openRoads || before.minRoadLength !== this.minRoadLength || before.randomRoads !== this.randomRoads;
+    const changed = before.openRoads !== this.openRoads || before.minRoadLength !== this.minRoadLength;
     if (changed) this.rebuildRoads();
   }
   setMaxTroops(value) {
@@ -2401,30 +2318,30 @@ var Game = class {
     }
     const m = defOf(t);
     const dv = armyPower(t.army) * m;
-    t.hit = 1;
-    this.fxAdd({ k: "ring", x: t.x, y: t.y, c: "#ffffff", l: 0.6 });
-    this.shake = Math.min(1, this.shake + 0.35);
     if (s.hp > dv + 1e-8) {
       const prev = t.o;
       t.o = s.o;
       t.army = emptyArmy();
       t.army[s.unit] = s.hp - dv;
       t.pt = 0;
-      t.fl = 1;
+      t.hit = 0.5;
+      t.fl = 0.72;
       t.lvl = 1;
       t.cap = Math.min(CFG.capStart, this.baseCap);
       t.capTimer = 0;
-      this.fxAdd({ k: "ring", x: t.x, y: t.y, c: COL[s.o], l: 0.95, r: 90 });
-      this.fxAdd({ k: "burst", x: t.x, y: t.y - 10, c: COL[s.o], l: 0.7 });
+      this.shake = Math.min(0.65, this.shake + 0.18);
+      this.fxAdd({ k: "capture", x: t.x, y: t.y, c: COL[s.o], l: 1.05, r: 86 });
       if (s.o === 1) {
         this.onToast(prev === 0 ? "ساختمان تصرف شد!" : "ساختمان دشمن گرفته شد!");
         sfx.capture();
-        playCaptureSound();
       } else if (prev === 1) {
         this.onToast("یک ساختمان را از دست دادی!");
         sfx.lose();
       }
     } else {
+      t.hit = 0.85;
+      this.shake = Math.min(0.8, this.shake + 0.24);
+      this.fxAdd({ k: "ring", x: t.x, y: t.y + 8, c: "#ffffff", l: 0.5, r: 46 });
       const before = t.tr;
       damageArmy(t.army, s.hp / m);
       const lost = before - t.tr;
@@ -3148,17 +3065,28 @@ function drawB(c, g, b, T) {
   }
   drawStructure(c, b, T, isSel || isDraft || g.hover === b);
   if (b.hit > 0) {
-    c.strokeStyle = `rgba(255,90,80,${b.hit * 0.9})`;
-    c.lineWidth = 5;
+    const h = Math.max(0, Math.min(1, b.hit));
+    const rx = 40 + (1 - h) * 16;
+    c.strokeStyle = `rgba(255,108,92,${(h * 0.72).toFixed(3)})`;
+    c.lineWidth = 2.6 * h + 0.8;
     c.beginPath();
-    c.arc(X, Y, 46 + (1 - b.hit) * 16, 0, 7);
+    c.ellipse(X, Y + 9, rx, rx * 0.5, 0, 0, Math.PI * 2);
     c.stroke();
   }
   if (b.fl > 0) {
-    c.fillStyle = `rgba(255,255,255,${b.fl * 0.65})`;
+    const fl = Math.max(0, Math.min(1, b.fl));
+    const col = COL[b.o] || "#ffffff";
+    c.save();
+    c.globalCompositeOperation = "lighter";
+    const glow = c.createRadialGradient(X, Y - 20, 4, X, Y - 20, 52);
+    glow.addColorStop(0, withAlpha("#ffffff", fl * 0.28));
+    glow.addColorStop(0.45, withAlpha(tint(col, 42), fl * 0.2));
+    glow.addColorStop(1, withAlpha(col, 0));
+    c.fillStyle = glow;
     c.beginPath();
-    c.arc(X, Y, 50, 0, 7);
+    c.arc(X, Y - 20, 52, 0, Math.PI * 2);
     c.fill();
+    c.restore();
   }
   if (isTarget && g.preview?.sources.length) drawTargetMark(c, g.preview, T, dashAlpha(g));
 }
@@ -3372,6 +3300,90 @@ function arrows(c, g, T) {
     c.restore();
   }
 }
+function drawCaptureEffect(c, f, p) {
+  const clamped = Math.max(0, Math.min(1, p));
+  const ease = 1 - Math.pow(1 - clamped, 3);
+  const fade = Math.pow(1 - clamped, 1.4);
+  const maxR = f.r || 86;
+  const bright = tint(f.c, 56);
+  const gold = "#ffe8a3";
+  const gy = f.y + 9;
+  c.save();
+  c.save();
+  c.translate(f.x, gy);
+  c.scale(1, 0.5);
+  const groundGlow = c.createRadialGradient(0, 0, 8, 0, 0, maxR);
+  groundGlow.addColorStop(0, withAlpha(bright, 0.22 * fade));
+  groundGlow.addColorStop(0.55, withAlpha(f.c, 0.16 * fade));
+  groundGlow.addColorStop(1, withAlpha(f.c, 0));
+  c.fillStyle = groundGlow;
+  c.beginPath();
+  c.arc(0, 0, maxR, 0, Math.PI * 2);
+  c.fill();
+  c.restore();
+  const rx1 = 30 + ease * (maxR - 30);
+  c.strokeStyle = withAlpha(f.c, 0.85 * fade);
+  c.lineWidth = 3 * (1 - clamped) + 0.9;
+  c.beginPath();
+  c.ellipse(f.x, gy, rx1, rx1 * 0.5, 0, 0, Math.PI * 2);
+  c.stroke();
+  if (clamped > 0.05) {
+    const p2 = Math.min(1, (clamped - 0.05) / 0.9);
+    const ease2 = 1 - Math.pow(1 - p2, 3);
+    const fade2 = Math.pow(1 - p2, 1.5);
+    const rx2 = 22 + ease2 * (maxR * 0.76 - 22);
+    c.strokeStyle = withAlpha(gold, 0.72 * fade2);
+    c.lineWidth = 1.9 * (1 - p2) + 0.6;
+    c.beginPath();
+    c.ellipse(f.x, gy, rx2, rx2 * 0.5, 0, 0, Math.PI * 2);
+    c.stroke();
+  }
+  const beamEnvelope = clamped < 0.18 ? clamped / 0.18 : Math.pow(Math.max(0, 1 - (clamped - 0.18) / 0.82), 1.85);
+  if (beamEnvelope > 5e-3) {
+    c.save();
+    c.globalCompositeOperation = "lighter";
+    c.translate(f.x, f.y - 26);
+    c.scale(0.62, 1.15);
+    const auraR = 46 + ease * 10;
+    const beam = c.createRadialGradient(0, 0, 3, 0, 0, auraR);
+    beam.addColorStop(0, withAlpha("#ffffff", 0.3 * beamEnvelope));
+    beam.addColorStop(0.4, withAlpha(bright, 0.24 * beamEnvelope));
+    beam.addColorStop(1, withAlpha(f.c, 0));
+    c.fillStyle = beam;
+    c.beginPath();
+    c.arc(0, 0, auraR, 0, Math.PI * 2);
+    c.fill();
+    c.restore();
+  }
+  const moteCount = 10;
+  for (let k = 0; k < moteCount; k++) {
+    const delay = k % 4 * 0.045;
+    if (clamped <= delay) continue;
+    const mp = Math.min(1, (clamped - delay) / (1 - delay));
+    const mEase = 1 - Math.pow(1 - mp, 2.4);
+    const mAlpha = Math.sin(Math.min(1, mp) * Math.PI) * 0.92;
+    if (mAlpha <= 0.02) continue;
+    const baseAng = k / moteCount * Math.PI * 2 + 0.35;
+    const swirl = baseAng + mEase * 0.55;
+    const orbitR = 22 + k % 3 * 7 + mEase * 12;
+    const mx = f.x + Math.cos(swirl) * orbitR;
+    const my = f.y - 8 + Math.sin(swirl) * orbitR * 0.46 - mEase * (44 + k % 3 * 13);
+    const sz = (5.2 - k % 3 * 0.75) * (1 - mp * 0.65);
+    const col = k % 2 === 0 ? bright : gold;
+    c.globalAlpha = mAlpha;
+    polygon(
+      c,
+      [
+        { x: mx, y: my - sz * 1.35 },
+        { x: mx + sz * 0.85, y: my },
+        { x: mx, y: my + sz * 1.35 },
+        { x: mx - sz * 0.85, y: my }
+      ],
+      col
+    );
+  }
+  c.restore();
+}
 function withAlpha(hex, a) {
   const h = hex.replace("#", "");
   const n = parseInt(h.length === 3 ? h.split("").map((x) => x + x).join("") : h, 16);
@@ -3484,7 +3496,11 @@ function render(c, g, T, W, H, dpr) {
   ];
   drawables.sort((a, b) => a.y - b.y).forEach((item) => item.draw());
   for (const f of g.fx) {
-    const p = f.t / f.l;
+    const p = Math.max(0, Math.min(1, f.t / f.l));
+    if (f.k === "capture") {
+      drawCaptureEffect(c, f, p);
+      continue;
+    }
     c.globalAlpha = Math.max(0, 1 - p);
     if (f.k === "txt") {
       c.font = "900 22px " + F_BODY;
@@ -3496,21 +3512,34 @@ function render(c, g, T, W, H, dpr) {
       c.fillStyle = f.c;
       c.fillText(f.s || "", f.x, f.y - p * 36);
     } else if (f.k === "burst") {
-      const R = (f.r || 40) * (0.3 + p);
-      c.strokeStyle = f.c;
-      c.lineWidth = 4 * (1 - p) + 1;
+      const ease = 1 - Math.pow(1 - p, 2.5);
+      const R = (f.r || 40) * (0.25 + ease * 0.85);
       for (let k = 0; k < 8; k++) {
-        const a = k / 8 * Math.PI * 2 + p * 1.4;
-        c.beginPath();
-        c.moveTo(f.x + Math.cos(a) * R * 0.35, f.y + Math.sin(a) * R * 0.35);
-        c.lineTo(f.x + Math.cos(a) * R, f.y + Math.sin(a) * R);
-        c.stroke();
+        const a = k / 8 * Math.PI * 2 + ease * 0.6;
+        const r0 = R * 0.32;
+        const r1 = R * (0.9 + k % 2 * 0.14);
+        const mid = (r0 + r1) * 0.5;
+        const w = 2.6 * (1 - p);
+        const nx = -Math.sin(a) * w;
+        const ny = Math.cos(a) * w;
+        polygon(
+          c,
+          [
+            { x: f.x + Math.cos(a) * r0, y: f.y + Math.sin(a) * r0 },
+            { x: f.x + Math.cos(a) * mid + nx, y: f.y + Math.sin(a) * mid + ny },
+            { x: f.x + Math.cos(a) * r1, y: f.y + Math.sin(a) * r1 },
+            { x: f.x + Math.cos(a) * mid - nx, y: f.y + Math.sin(a) * mid - ny }
+          ],
+          k % 2 === 0 ? f.c : tint(f.c, 45)
+        );
       }
     } else {
+      const ease = 1 - Math.pow(1 - p, 2.6);
+      const rx = 14 + ease * (f.r || 56);
       c.strokeStyle = f.c;
-      c.lineWidth = 6 * (1 - p) + 1;
+      c.lineWidth = 3.2 * (1 - p) + 0.8;
       c.beginPath();
-      c.arc(f.x, f.y, 12 + p * (f.r || 62), 0, 7);
+      c.ellipse(f.x, f.y, rx, rx * 0.52, 0, 0, Math.PI * 2);
       c.stroke();
     }
     c.globalAlpha = 1;
@@ -3540,13 +3569,13 @@ var DEFAULT_GLOBAL_SETTINGS = {
   battleMode: "field",
   maxTroops: 50,
   openRoads: true,
-  minCastleDistance: 30,
+  minCastleDistance: 10,
   ambientSound: true,
   marchSound: true,
   unitTuning: DEFAULT_UNIT_TUNING,
   haloSpin: DEFAULT_HALO_SPIN,
   attackDash: DEFAULT_ATTACK_DASH,
-  volumes: Object.fromEntries(SFX_KEYS.map((k) => [k, 1]))
+  volumes: { ...DEFAULT_SFX_VOLUMES }
 };
 function writeJSON(key, value) {
   try {
@@ -3631,7 +3660,7 @@ function normalizeGlobalSettings(raw) {
   base.maxTroops = VALID_CAPS.includes(cap) ? cap : Number.isFinite(cap) && cap >= 1 && cap <= 1e3 ? Math.floor(cap) : 50;
   base.openRoads = base.openRoads === true;
   const dist = Number(base.minCastleDistance);
-  base.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 30;
+  base.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 10;
   base.ambientSound = base.ambientSound !== false;
   base.marchSound = base.marchSound !== false;
   base.snd = base.snd !== false;
@@ -3644,7 +3673,7 @@ function normalizeGlobalSettings(raw) {
   base.volumes = Object.fromEntries(
     SFX_KEYS.map((key) => {
       const v = Number(rawVolumes[key]);
-      return [key, Number.isFinite(v) ? Math.max(0, Math.min(1, Math.round(v * 100) / 100)) : 1];
+      return [key, Number.isFinite(v) ? Math.max(0, Math.min(1, Math.round(v * 100) / 100)) : DEFAULT_SFX_VOLUMES[key]];
     })
   );
   return base;
@@ -3690,6 +3719,7 @@ function loadMapSettings() {
     const clean2 = normalizeRandomMap(source.customMap ?? source);
     mapExtras = pickExtras(source.customMap ?? source, Object.keys(DEFAULT_RANDOM_MAP));
     delete mapExtras.mountains;
+    delete mapExtras.randomRoads;
     const merged = { ...mapExtras, ...clean2 };
     if (found.key !== MAP_KEY || JSON.stringify(merged) !== JSON.stringify(found.parsed)) {
       writeWithBackup(MAP_KEY, MAP_BACKUP, merged);
@@ -3905,12 +3935,6 @@ function importSettingsJson(text, current) {
     recognized++;
     touchedMap = true;
   }
-  const randRoadsProp = readProp(mapSource, "randomRoads", "RandomRoads");
-  if (randRoadsProp.found && typeof randRoadsProp.value === "boolean") {
-    draftMap.randomRoads = randRoadsProp.value;
-    recognized++;
-    touchedMap = true;
-  }
   if (recognized === 0) {
     return { ok: false, error: "هیچ تنظیم شناخته‌شده‌ای در این کد یا فایل پیدا نشد." };
   }
@@ -3991,11 +4015,12 @@ var defaultSettings = {
   maxTroopsCap: 50,
   customMap: DEFAULT_RANDOM_MAP,
   openRoads: true,
-  minCastleDistance: 30,
+  minCastleDistance: 10,
   ambientSound: true,
   marchSound: true,
   haloSpin: DEFAULT_HALO_SPIN,
-  attackDash: DEFAULT_ATTACK_DASH
+  attackDash: DEFAULT_ATTACK_DASH,
+  volumes: { ...DEFAULT_SFX_VOLUMES }
 };
 function extractUnitTuning(raw) {
   const t = raw && typeof raw === "object" ? raw : {};
@@ -4020,7 +4045,7 @@ function normalize(input) {
   settings.customMap = normalizeRandomMap(settings.customMap);
   settings.openRoads = settings.openRoads === true;
   const dist = Number(settings.minCastleDistance);
-  settings.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 30;
+  settings.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 10;
   settings.ambientSound = settings.ambientSound !== false;
   settings.marchSound = settings.marchSound !== false;
   const tuned = extractUnitTuning(settings.troopTuning);
@@ -4085,7 +4110,10 @@ function blazorToSave(input) {
   const s = normalize(input);
   const done = Array.from({ length: 30 }, (_, idx) => s.completedLevels.includes(idx));
   const volumes2 = Object.fromEntries(
-    SFX_KEYS.map((key) => [key, Number.isFinite(Number(s.volumes?.[key])) ? Number(s.volumes[key]) : 1])
+    SFX_KEYS.map((key) => [
+      key,
+      Number.isFinite(Number(s.volumes?.[key])) ? Number(s.volumes[key]) : DEFAULT_SFX_VOLUMES[key]
+    ])
   );
   const global = normalizeGlobalSettings({
     unlocked: s.unlockedLevel,
@@ -4117,7 +4145,6 @@ function saveToBlazor(save, current) {
     customMap: save.customMap,
     openRoads: save.openRoads,
     minCastleDistance: save.minCastleDistance,
-    randomRoads: save.customMap.randomRoads,
     ambientSound: save.ambientSound,
     marchSound: save.marchSound,
     troopTuning: {
@@ -4208,8 +4235,7 @@ function applyRules(s) {
   g.setMaxTroops(s.settings.maxTroopsCap);
   g.setRoadRules({
     openRoads: s.settings.openRoads,
-    minRoadLength: s.settings.minCastleDistance * PX_PER_METER,
-    randomRoads: s.settings.customMap.randomRoads
+    minRoadLength: s.settings.minCastleDistance * PX_PER_METER
   });
   applyUnitTuning(extractUnitTuning(s.settings.troopTuning));
   g.haloSpin = normalizeHaloSpin(s.settings.haloSpin);

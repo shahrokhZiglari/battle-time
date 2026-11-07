@@ -169,7 +169,6 @@
                 }
             </div>
             <button type="button" class="cg-btn @(Draft.CustomMap.LargeMap ? "cg-gold" : "")" aria-pressed="@Draft.CustomMap.LargeMap" @onclick="() => Draft.CustomMap.LargeMap = !Draft.CustomMap.LargeMap">نقشهٔ بزرگ با قابلیت زوم</button>
-            <button type="button" class="cg-btn @(Draft.CustomMap.RandomRoads ? "cg-gold" : "")" aria-pressed="@Draft.CustomMap.RandomRoads" @onclick="() => Draft.CustomMap.RandomRoads = !Draft.CustomMap.RandomRoads">راه‌ها کاملاً رندوم باشند</button>
             <div class="cg-step-row">
                 <span>قلعهٔ عادی</span>
                 <button type="button" class="cg-step" aria-label="کاهش قلعهٔ عادی" @onclick="() => MapCount("normal",-1)">−</button>

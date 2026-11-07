@@ -29,22 +29,15 @@ setSound(false);
   console.log("PASS: open passage adds no extra bridges.");
 }
 
-// 3) راه‌های رندوم هم همیشه قلعه‌ها را به هم می‌رسانند.
+// 3) شبکهٔ استاندارد راه‌ها همیشه پیوسته است و همهٔ قلعه‌ها را به هم می‌رساند.
 {
-  const mk = (randomRoads: boolean) => {
-    const g = new Game(1);
-    g.roadRandom = () => 0.5;
-    g.setRoadRules({ randomRoads });
-    return g;
-  };
-  const a = mk(true);
-  const b = mk(true);
-  assert.deepEqual(a.links, b.links, "the same random source gives the same roads");
+  const g = new Game(1);
+  g.setRoadRules({ minRoadLength: 10 * PX_PER_METER });
   const seen = new Set<number>();
-  const walk = (n: number) => { seen.add(n); for (const m of a.adj[n]) if (!seen.has(m)) walk(m); };
+  const walk = (n: number) => { seen.add(n); for (const m of g.adj[n]) if (!seen.has(m)) walk(m); };
   walk(0);
-  assert.equal(seen.size, a.bs.length, "random roads still reach every castle");
-  console.log("PASS: random roads are reproducible and still connect every castle.");
+  assert.equal(seen.size, g.bs.length, "roads reach every castle");
+  console.log("PASS: standard roads connect every castle cleanly with 10m default spacing.");
 }
 
 // 4) زوم روی نقطهٔ لنگر و بازنشانی.
@@ -68,15 +61,15 @@ setSound(false);
   console.log("PASS: zoom keeps the cursor point anchored and resets to fit.");
 }
 
-// 5) تنظیمات ذخیره‌شده: فاصله به متر، راه‌های رندوم در مپ رندوم.
+// 5) تنظیمات ذخیره‌شده: فاصله پیش‌فرض ۱۰ متر و حذف گزینهٔ راه‌های رندوم.
 {
   const save = loadSave();
   assert.equal(typeof save.minCastleDistance, "number");
   assert.ok(save.minCastleDistance >= 0 && save.minCastleDistance <= 120);
   assert.equal(typeof save.openRoads, "boolean");
-  assert.equal(typeof save.customMap.randomRoads, "boolean");
+  assert.equal("randomRoads" in save.customMap, false, "randomRoads option is removed");
   assert.equal(typeof save.customMap.minDistance, "number");
-  console.log("PASS: minCastleDistance is in meters and randomRoads lives with the random map settings.");
+  console.log("PASS: minCastleDistance is in meters and randomRoads option is removed.");
 }
 
 // 6) مپ رندوم با فاصلهٔ همسایگان بزرگتر، قلعه‌های پرتراکم‌تری می‌سازد.
