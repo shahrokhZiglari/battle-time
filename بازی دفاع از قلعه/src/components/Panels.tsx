@@ -1,15 +1,26 @@
 import { ReactNode, useRef, useState } from "react";
-import { LEVELS, TROOP_TYPES, UNIT_LIMITS, HALO_SPIN_LIMITS, ATTACK_DASH_LIMITS, fa } from "../game/config";
+import {
+  ATTACK_DASH_LIMITS,
+  DEFAULT_ATTACK_DASH,
+  DEFAULT_HALO_SPIN,
+  DEFAULT_UNIT_TUNING,
+  fa,
+  HALO_SPIN_LIMITS,
+  LEVELS,
+  TROOP_TYPES,
+  UNIT_LIMITS,
+} from "../game/config";
 import { MAX_BOATS, MAX_LAKES, MAX_SHIPS } from "../game/map";
 import {
   copyTextToClipboard,
+  DEFAULT_GLOBAL_SETTINGS,
   downloadJsonFile,
   exportSettingsJson,
   importSettingsJson,
   Save,
   SETTINGS_FILE_NAME,
 } from "../game/save";
-import { SFX_KEYS, SFX_FULL_NAMES, SFX_LABELS, type SfxKey } from "../game/sound";
+import { DEFAULT_SFX_VOLUMES, SFX_KEYS, SFX_FULL_NAMES, SFX_LABELS, type SfxKey } from "../game/sound";
 import GestureDemo from "./GestureDemo";
 import { RotateRow } from "./RotateControl";
 import type { Rotation } from "../game/view";
@@ -296,7 +307,7 @@ export function HelpPanel({ onBack, fromGame = false }: { onBack: () => void; fr
             <BuildCard
               icon="🏰"
               title="قلعهٔ عادی"
-              body="سرباز عادی با قدرت ۱ و سرعت پایه؛ هر ۲ ثانیه یک سرباز تولید می‌کند."
+              body="سرباز عادی با قدرت ۱ و سرعت پیش‌فرض ۰٫۹؛ هر ۲ ثانیه یک سرباز تولید می‌کند."
               tone="linear-gradient(180deg,#3ddc84,#12855a)"
             />
             <BuildCard
@@ -308,13 +319,13 @@ export function HelpPanel({ onBack, fromGame = false }: { onBack: () => void; fr
             <BuildCard
               icon="⚡"
               title="قلعهٔ سریع"
-              body="سرباز سریع: قدرت ۱، درست مثل عادی؛ سرعت حرکت دقیقاً ۲ برابر سرباز عادی. هر ۳ ثانیه تولید."
+              body="سرباز سریع: قدرت ۱ و سرعت پیش‌فرض ۱٫۳؛ هر ۳ ثانیه یک سرباز تولید می‌کند."
               tone="linear-gradient(180deg,#7ad7ff,#1b6f9c)"
             />
             <BuildCard
-              icon="2x"
+              icon="🛡"
               title="قلعهٔ سنگین"
-              body="سرباز سنگین: قدرت ۲ برابر و سرعت حرکت دقیقاً دوسوم سرباز عادی. هر ۳ ثانیه تولید."
+              body="سرباز سنگین: قدرت پیش‌فرض ۱٫۵ و سرعت ۰٫۷؛ هر ۳ ثانیه یک سرباز تولید می‌کند."
               tone="linear-gradient(180deg,#e0c28d,#755831)"
             />
           </div>
@@ -744,7 +755,7 @@ export function SettingsPanel({
         >
           <div className="grid grid-cols-2 gap-x-1.5 gap-y-0">
             {SFX_KEYS.map((key, index) => {
-              const v = Math.max(0, Math.min(1, Number(save.volumes?.[key] ?? 1)));
+              const v = Math.max(0, Math.min(1, Number(save.volumes?.[key] ?? DEFAULT_SFX_VOLUMES[key])));
               // ردیفِ آخر (تعدادِ فرد) دو ستون را می‌گیرد تا هیچ خانهٔ خالیِ
               // بی‌دلیلی در پایینِ کارت نماند.
               const span = index === SFX_KEYS.length - 1 && SFX_KEYS.length % 2 === 1;
@@ -761,7 +772,7 @@ export function SettingsPanel({
                       dir={-1}
                       label={`بلندی صدای ${SFX_LABELS[key]}`}
                       disabled={v <= 0.001}
-                      onClick={() => setVol(key)(v - 0.05)}
+                      onClick={() => setVol(key)(v - 0.1)}
                     />
                     <span
                       className={`w-[36px] text-center font-display text-[12px] leading-none ${v <= 0.001 ? "text-foe" : "text-bone"}`}
@@ -772,7 +783,7 @@ export function SettingsPanel({
                       dir={1}
                       label={`بلندی صدای ${SFX_LABELS[key]}`}
                       disabled={v >= 0.999}
-                      onClick={() => setVol(key)(v + 0.05)}
+                      onClick={() => setVol(key)(v + 0.1)}
                     />
                   </span>
                 </div>
@@ -843,7 +854,35 @@ export function SettingsPanel({
         </SettingCard>
 
         {/* ---- نیروها: قدرت و سرعتِ هر نوع با + و − ---- */}
-        <SettingCard title="نیروها — قدرت و سرعتِ هر سرباز">
+        <SettingCard
+          title="نیروها — قدرت و سرعتِ هر سرباز"
+          right={
+            <button
+              type="button"
+              onClick={() =>
+                onChange((prev) => ({
+                  ...prev,
+                  ...DEFAULT_GLOBAL_SETTINGS,
+                  unlocked: prev.unlocked,
+                  done: [...prev.done],
+                  unitTuning: {
+                    normal: { ...DEFAULT_UNIT_TUNING.normal },
+                    fast: { ...DEFAULT_UNIT_TUNING.fast },
+                    heavy: { ...DEFAULT_UNIT_TUNING.heavy },
+                  },
+                  haloSpin: DEFAULT_HALO_SPIN,
+                  attackDash: DEFAULT_ATTACK_DASH,
+                  volumes: { ...DEFAULT_GLOBAL_SETTINGS.volumes },
+                }))
+              }
+              title="بازگردانی همهٔ تنظیمات به مقادیر پیش‌فرض (بدون پاک شدن مراحل)"
+              aria-label="بازنشانی تنظیمات به پیش‌فرض"
+              className="rounded border border-white/12 px-1.5 py-[2px] text-[11.5px] leading-none text-ash transition-colors hover:bg-white/10 hover:text-bone"
+            >
+              پیش‌فرض‌ها
+            </button>
+          }
+        >
           <div className="grid gap-[3px]">
             {TROOP_TYPES.map((type) => {
               const unit = save.unitTuning[type];
@@ -872,7 +911,7 @@ export function SettingsPanel({
                         dir={-1}
                         label={`قدرتِ سرباز ${label}`}
                         disabled={unit.power <= UNIT_LIMITS.power[0] + 1e-9}
-                        onClick={() => set({ power: clampNum(unit.power - 0.05, UNIT_LIMITS.power[0], UNIT_LIMITS.power[1]) })}
+                        onClick={() => set({ power: clampNum(unit.power - 0.1, UNIT_LIMITS.power[0], UNIT_LIMITS.power[1]) })}
                       />
                       <span className="w-[32px] text-center font-display text-[12.5px] leading-none text-bone">
                         {fa(Math.round(unit.power * 100) / 100)}
@@ -881,7 +920,7 @@ export function SettingsPanel({
                         dir={1}
                         label={`قدرتِ سرباز ${label}`}
                         disabled={unit.power >= UNIT_LIMITS.power[1] - 1e-9}
-                        onClick={() => set({ power: clampNum(unit.power + 0.05, UNIT_LIMITS.power[0], UNIT_LIMITS.power[1]) })}
+                        onClick={() => set({ power: clampNum(unit.power + 0.1, UNIT_LIMITS.power[0], UNIT_LIMITS.power[1]) })}
                       />
                     </span>
                   </span>
@@ -892,7 +931,7 @@ export function SettingsPanel({
                         dir={-1}
                         label={`سرعتِ سرباز ${label}`}
                         disabled={unit.speed <= UNIT_LIMITS.speed[0] + 1e-9}
-                        onClick={() => set({ speed: clampNum(unit.speed - 0.05, UNIT_LIMITS.speed[0], UNIT_LIMITS.speed[1]) })}
+                        onClick={() => set({ speed: clampNum(unit.speed - 0.1, UNIT_LIMITS.speed[0], UNIT_LIMITS.speed[1]) })}
                       />
                       <span className="w-[38px] text-center font-display text-[12.5px] leading-none text-bone">
                         ×{fa(Math.round(unit.speed * 100) / 100)}
@@ -901,7 +940,7 @@ export function SettingsPanel({
                         dir={1}
                         label={`سرعتِ سرباز ${label}`}
                         disabled={unit.speed >= UNIT_LIMITS.speed[1] - 1e-9}
-                        onClick={() => set({ speed: clampNum(unit.speed + 0.05, UNIT_LIMITS.speed[0], UNIT_LIMITS.speed[1]) })}
+                        onClick={() => set({ speed: clampNum(unit.speed + 0.1, UNIT_LIMITS.speed[0], UNIT_LIMITS.speed[1]) })}
                       />
                     </span>
                   </span>
@@ -940,7 +979,7 @@ export function SettingsPanel({
               display={save.haloSpin <= 0.001 ? "ثابت" : "×" + fa(Math.round(save.haloSpin * 100) / 100)}
               min={HALO_SPIN_LIMITS[0]}
               max={HALO_SPIN_LIMITS[1]}
-              step={0.05}
+              step={0.1}
               onChange={(v) => onChange({ haloSpin: v })}
             />
             <StepRow
@@ -950,7 +989,7 @@ export function SettingsPanel({
               display={pct(save.attackDash)}
               min={ATTACK_DASH_LIMITS[0]}
               max={ATTACK_DASH_LIMITS[1]}
-              step={0.05}
+              step={0.1}
               onChange={(v) => onChange({ attackDash: v })}
             />
           </div>
@@ -1102,7 +1141,6 @@ export function RandomMapPanel({
             </div>
           </div>
           <Toggle label="نقشهٔ بزرگ (زوم)" icon="🔍" checked={settings.largeMap} onChange={(v) => set({ largeMap: v })} />
-          <Toggle label="راه‌های رندوم" icon="🛤" checked={settings.randomRoads} onChange={(v) => set({ randomRoads: v })} />
           <div className="flex items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-2">
             <span className="min-w-0 truncate text-[13px] text-ash">حداقل فاصلهٔ قلعه‌ها</span>
             <span className="flex shrink-0 items-center gap-1">

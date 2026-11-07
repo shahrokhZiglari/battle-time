@@ -1,7 +1,7 @@
-import { applyUnitTuning, COL, LEVELS, normalizeAttackDash, normalizeHaloSpin, normalizeUnitTuning, type UnitTuningMap } from "../src/game/config";
+import { applyUnitTuning, COL, DEFAULT_ATTACK_DASH, DEFAULT_HALO_SPIN, LEVELS, normalizeAttackDash, normalizeHaloSpin, normalizeUnitTuning, type UnitTuningMap } from "../src/game/config";
 import { Game } from "../src/game/engine";
 import { render } from "../src/game/render";
-import { setNatureLayers, setSfxVolumes, setSound, sfx, SFX_KEYS, type SfxKey } from "../src/game/sound";
+import { DEFAULT_SFX_VOLUMES, setNatureLayers, setSfxVolumes, setSound, sfx, SFX_KEYS, type SfxKey } from "../src/game/sound";
 import { createRandomLevel, DEFAULT_RANDOM_MAP, normalizeRandomMap, validateRandomMap, PX_PER_METER, type RandomMapSettings } from "../src/game/map";
 import {
   copyTextToClipboard,
@@ -23,10 +23,8 @@ interface Settings {
   customMap: RandomMapSettings;
   /** every castle can reach every other castle */
   openRoads: boolean;
-  /** shortest road that may be built, in pixels */
+  /** shortest road that may be built, in meters */
   minCastleDistance: number;
-  /** roads are picked at random */
-  randomRoads: boolean;
   /** calm nature ambience */
   ambientSound: boolean;
   /** marching sound while troops travel */
@@ -83,9 +81,12 @@ const defaultSettings: Settings = {
   maxTroopsCap: 50,
   customMap: DEFAULT_RANDOM_MAP,
   openRoads: true,
-  minCastleDistance: 30,
+  minCastleDistance: 0,
   ambientSound: true,
   marchSound: true,
+  haloSpin: DEFAULT_HALO_SPIN,
+  attackDash: DEFAULT_ATTACK_DASH,
+  volumes: { ...DEFAULT_SFX_VOLUMES },
 };
 
 function extractUnitTuning(raw: unknown): UnitTuningMap {
@@ -114,7 +115,7 @@ function normalize(input: Partial<Settings> | null): Settings {
   settings.customMap = normalizeRandomMap(settings.customMap);
   settings.openRoads = settings.openRoads === true;
   const dist = Number(settings.minCastleDistance);
-  settings.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 30;
+  settings.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 0;
   settings.ambientSound = settings.ambientSound !== false;
   settings.marchSound = settings.marchSound !== false;
   const tuned = extractUnitTuning(settings.troopTuning);
@@ -188,7 +189,10 @@ export function blazorToSave(input: Partial<Settings> | null): Save {
   const s = normalize(input);
   const done = Array.from({ length: 30 }, (_, idx) => s.completedLevels.includes(idx));
   const volumes = Object.fromEntries(
-    SFX_KEYS.map((key) => [key, Number.isFinite(Number(s.volumes?.[key])) ? Number(s.volumes![key]) : 1]),
+    SFX_KEYS.map((key) => [
+      key,
+      Number.isFinite(Number(s.volumes?.[key])) ? Number(s.volumes![key]) : DEFAULT_SFX_VOLUMES[key],
+    ]),
   ) as Record<SfxKey, number>;
   const global = normalizeGlobalSettings({
     unlocked: s.unlockedLevel,
@@ -222,7 +226,6 @@ export function saveToBlazor(save: Save, current?: Partial<Settings> | null): Se
     customMap: save.customMap,
     openRoads: save.openRoads,
     minCastleDistance: save.minCastleDistance,
-    randomRoads: save.customMap.randomRoads,
     ambientSound: save.ambientSound,
     marchSound: save.marchSound,
     troopTuning: {
@@ -328,7 +331,6 @@ function applyRules(s: Session) {
   g.setRoadRules({
     openRoads: s.settings.openRoads,
     minRoadLength: s.settings.minCastleDistance * PX_PER_METER,
-    randomRoads: s.settings.customMap.randomRoads,
   });
   applyUnitTuning(extractUnitTuning(s.settings.troopTuning));
   g.haloSpin = normalizeHaloSpin(s.settings.haloSpin);

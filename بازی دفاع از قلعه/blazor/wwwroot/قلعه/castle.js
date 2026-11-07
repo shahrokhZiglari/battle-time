@@ -25,15 +25,15 @@ var CFG = {
 };
 var TROOP_TYPES = ["normal", "fast", "heavy"];
 var UNITS = {
-  normal: { label: "عادی", power: 1, speed: 1 },
-  fast: { label: "سریع", power: 1, speed: 1.5 },
-  heavy: { label: "سنگین", power: 2, speed: 2 / 3 }
+  normal: { label: "عادی", power: 1, speed: 0.9 },
+  fast: { label: "سریع", power: 1, speed: 1.3 },
+  heavy: { label: "سنگین", power: 1.5, speed: 0.7 }
 };
 var UNIT_LIMITS = { power: [0.5, 4], speed: [0.4, 2.5] };
 var DEFAULT_UNIT_TUNING = {
-  normal: { power: 1, speed: 1 },
-  fast: { power: 1, speed: 1.5 },
-  heavy: { power: 2, speed: 2 / 3 }
+  normal: { power: 1, speed: 0.9 },
+  fast: { power: 1, speed: 1.3 },
+  heavy: { power: 1.5, speed: 0.7 }
 };
 var clampNumber = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 function normalizeUnitTuning(raw) {
@@ -58,13 +58,13 @@ function applyUnitTuning(raw) {
   }
   return tuning;
 }
-var DEFAULT_HALO_SPIN = 1.35;
+var DEFAULT_HALO_SPIN = 0.1;
 var HALO_SPIN_LIMITS = [0, 3];
 var normalizeHaloSpin = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? Math.round(clampNumber(n, ...HALO_SPIN_LIMITS) * 100) / 100 : DEFAULT_HALO_SPIN;
 };
-var DEFAULT_ATTACK_DASH = 1;
+var DEFAULT_ATTACK_DASH = 0.3;
 var ATTACK_DASH_LIMITS = [0, 1];
 var normalizeAttackDash = (v) => {
   const n = Number(v);
@@ -119,7 +119,7 @@ var INTRO_LEVELS = [
   {
     name: "تاکتیک",
     ai: 0.85,
-    hint: "سرباز سریع دو برابر تندتر است؛ سرباز سنگین دو برابر قدرت دارد اما با سرعت دوسوم حرکت می‌کند.",
+    hint: "سرباز سریع چابک‌تر است (سرعت ۱٫۳)؛ سرباز سنگین قدرت ۱٫۵ برابر دارد اما آرام‌تر حرکت می‌کند (سرعت ۰٫۷).",
     b: [
       [100, 300, 1, "barracks", 30],
       [300, 120, 0, "speed", 8],
@@ -376,35 +376,6 @@ function stopMarch() {
   marchGain = null;
   marchOn = false;
 }
-function playCaptureSound() {
-  const a = audio();
-  if (!a || !master) return;
-  const now = a.currentTime;
-  const notes = [392, 523, 659, 784];
-  notes.forEach((freq, i) => {
-    const osc = a.createOscillator();
-    const g = a.createGain();
-    const t = now + i * 0.085;
-    osc.type = "triangle";
-    osc.frequency.setValueAtTime(freq, t);
-    g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(0.16, t + 0.02);
-    g.gain.exponentialRampToValueAtTime(8e-4, t + 0.5);
-    osc.connect(g).connect(master);
-    osc.start(t);
-    osc.stop(t + 0.55);
-  });
-  const boom = a.createOscillator();
-  const bg = a.createGain();
-  boom.type = "sine";
-  boom.frequency.setValueAtTime(160, now);
-  boom.frequency.exponentialRampToValueAtTime(42, now + 0.32);
-  bg.gain.setValueAtTime(0.18, now);
-  bg.gain.exponentialRampToValueAtTime(8e-4, now + 0.42);
-  boom.connect(bg).connect(master);
-  boom.start(now);
-  boom.stop(now + 0.45);
-}
 function stopAllNature() {
   stopAmbient();
   stopMarch();
@@ -428,16 +399,19 @@ var SFX_KEYS = [
   "start",
   "hover"
 ];
-var volumes = {};
+var DEFAULT_SFX_VOLUMES = Object.fromEntries(
+  SFX_KEYS.map((k) => [k, k === "capture" ? 0.1 : 1])
+);
+var volumes = { ...DEFAULT_SFX_VOLUMES };
 function setSfxVolumes(next) {
   for (const key of SFX_KEYS) {
     const raw = next?.[key];
-    volumes[key] = Number.isFinite(Number(raw)) ? Math.max(0, Math.min(1, Number(raw))) : 1;
+    volumes[key] = Number.isFinite(Number(raw)) ? Math.max(0, Math.min(1, Number(raw))) : DEFAULT_SFX_VOLUMES[key];
   }
-  setNatureVolume("ambient", volumes.ambient ?? 1);
-  setNatureVolume("march", volumes.march ?? 1);
+  setNatureVolume("ambient", volumes.ambient ?? DEFAULT_SFX_VOLUMES.ambient);
+  setNatureVolume("march", volumes.march ?? DEFAULT_SFX_VOLUMES.march);
 }
-var vol = (key) => key ? volumes[key] ?? 1 : 1;
+var vol = (key) => key ? volumes[key] ?? DEFAULT_SFX_VOLUMES[key] : 1;
 var ac2 = null;
 var enabled = true;
 var setSound = (v) => {
@@ -498,73 +472,6 @@ function sweep(f0, f1, d = 0.18, t = "triangle", v = 0.05, key) {
   }
 }
 var jingle = (a, key) => a.forEach((f, i) => setTimeout(() => beep(f, 0.2, "triangle", 0.06, key), i * 125));
-function brass(ctxA, freq, at, dur, vol2, cut = 2600, dest, vibrato = 6e-3) {
-  const now = ctxA.currentTime;
-  const filter = ctxA.createBiquadFilter();
-  filter.type = "lowpass";
-  filter.frequency.setValueAtTime(500, now + at);
-  filter.frequency.exponentialRampToValueAtTime(cut, now + at + 0.05);
-  filter.frequency.exponentialRampToValueAtTime(cut * 0.72, now + at + dur);
-  filter.Q.value = 1.4;
-  const g = ctxA.createGain();
-  g.gain.setValueAtTime(1e-4, now + at);
-  g.gain.exponentialRampToValueAtTime(vol2, now + at + 0.02);
-  g.gain.setValueAtTime(vol2, now + at + dur * 0.78);
-  g.gain.exponentialRampToValueAtTime(6e-4, now + at + dur);
-  filter.connect(g);
-  g.connect(dest ?? ctxA.destination);
-  for (const detune of [-6, 6]) {
-    const o = ctxA.createOscillator();
-    o.type = "sawtooth";
-    o.frequency.value = freq;
-    o.detune.value = detune;
-    const lfo = ctxA.createOscillator();
-    const lfoGain = ctxA.createGain();
-    lfo.frequency.value = 5.4;
-    lfoGain.gain.value = freq * vibrato;
-    lfo.connect(lfoGain);
-    lfoGain.connect(o.frequency);
-    o.connect(filter);
-    o.start(now + at);
-    o.stop(now + at + dur + 0.06);
-    lfo.start(now + at);
-    lfo.stop(now + at + dur + 0.06);
-  }
-}
-function noiseHit(ctxA, at, dur, freq, vol2, q = 1.2, dest) {
-  const length = Math.max(1, Math.floor(ctxA.sampleRate * dur));
-  const buffer = ctxA.createBuffer(1, length, ctxA.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / length);
-  const src = ctxA.createBufferSource();
-  src.buffer = buffer;
-  const filter = ctxA.createBiquadFilter();
-  filter.type = "bandpass";
-  filter.frequency.value = freq;
-  filter.Q.value = q;
-  const g = ctxA.createGain();
-  g.gain.value = vol2;
-  src.connect(filter);
-  filter.connect(g);
-  g.connect(dest ?? ctxA.destination);
-  src.start(ctxA.currentTime + at);
-}
-function bell(ctxA, freq, at, dur, vol2, dest) {
-  const now = ctxA.currentTime;
-  for (const [mult, amp, decay] of [[1, 1, 1], [2.01, 0.42, 0.62], [3.02, 0.2, 0.4], [4.17, 0.1, 0.28]]) {
-    const o = ctxA.createOscillator();
-    const g = ctxA.createGain();
-    o.type = "sine";
-    o.frequency.value = freq * mult;
-    g.gain.setValueAtTime(1e-4, now + at);
-    g.gain.exponentialRampToValueAtTime(vol2 * amp, now + at + 6e-3);
-    g.gain.exponentialRampToValueAtTime(4e-4, now + at + dur * decay);
-    o.connect(g);
-    g.connect(dest ?? ctxA.destination);
-    o.start(now + at);
-    o.stop(now + at + dur * decay + 0.05);
-  }
-}
 function captureFanfare() {
   if (!enabled) return;
   const a = ctx();
@@ -572,47 +479,69 @@ function captureFanfare() {
   try {
     const level = vol("capture");
     if (level <= 1e-3) return;
-    const bus = a.createGain();
-    bus.gain.value = 0.72 * level;
-    const shaper = a.createWaveShaper();
-    const curve = new Float32Array(1024);
-    for (let i = 0; i < curve.length; i++) {
-      const x = i / (curve.length - 1) * 2 - 1;
-      curve[i] = Math.tanh(x * 1.6) / Math.tanh(1.6);
-    }
-    shaper.curve = curve;
-    shaper.oversample = "2x";
-    bus.connect(shaper);
-    shaper.connect(a.destination);
     const now = a.currentTime;
-    const drum = a.createOscillator();
-    const drumGain = a.createGain();
-    drum.type = "sine";
-    drum.frequency.setValueAtTime(168, now);
-    drum.frequency.exponentialRampToValueAtTime(46, now + 0.28);
-    drumGain.gain.setValueAtTime(0.34, now);
-    drumGain.gain.exponentialRampToValueAtTime(1e-3, now + 0.42);
-    drum.connect(drumGain);
-    drumGain.connect(bus);
-    drum.start();
-    drum.stop(now + 0.45);
-    noiseHit(a, 0, 0.2, 220, 0.13, 0.8, bus);
-    noiseHit(a, 0.01, 0.9, 5600, 0.045, 0.9, bus);
-    for (const [f, v] of [[130.81, 0.062], [196, 0.058], [261.63, 0.055], [329.63, 0.045], [392, 0.03]]) {
-      brass(a, f, 0, 0.5, v, 2300, bus);
+    const bus = a.createGain();
+    bus.gain.setValueAtTime(0.42 * level, now);
+    const warmFilter = a.createBiquadFilter();
+    warmFilter.type = "lowpass";
+    warmFilter.frequency.setValueAtTime(2400, now);
+    warmFilter.Q.value = 0.7;
+    bus.connect(warmFilter);
+    warmFilter.connect(a.destination);
+    const thud = a.createOscillator();
+    const thudGain = a.createGain();
+    thud.type = "sine";
+    thud.frequency.setValueAtTime(132, now);
+    thud.frequency.exponentialRampToValueAtTime(55, now + 0.18);
+    thudGain.gain.setValueAtTime(0.24, now);
+    thudGain.gain.exponentialRampToValueAtTime(8e-4, now + 0.24);
+    thud.connect(thudGain);
+    thudGain.connect(bus);
+    thud.start(now);
+    thud.stop(now + 0.26);
+    for (const [freq, amp] of [[261.63, 0.11], [392, 0.09]]) {
+      const pad = a.createOscillator();
+      const padGain = a.createGain();
+      pad.type = "triangle";
+      pad.frequency.setValueAtTime(freq, now);
+      padGain.gain.setValueAtTime(1e-4, now);
+      padGain.gain.linearRampToValueAtTime(amp, now + 0.03);
+      padGain.gain.exponentialRampToValueAtTime(8e-4, now + 0.52);
+      pad.connect(padGain);
+      padGain.connect(bus);
+      pad.start(now);
+      pad.stop(now + 0.55);
     }
-    for (const [f, at] of [[392, 0.18], [523.25, 0.33], [659.25, 0.48]]) {
-      brass(a, f, at, 0.24, 0.09, 3300, bus, 4e-3);
-      brass(a, f / 2, at, 0.24, 0.03, 1650, bus, 4e-3);
+    const notes = [
+      [392, 0, 0.28, 0.15],
+      [523.25, 0.065, 0.3, 0.16],
+      [659.25, 0.13, 0.34, 0.17],
+      [783.99, 0.195, 0.44, 0.2]
+    ];
+    for (const [freq, at, dur, amp] of notes) {
+      const osc = a.createOscillator();
+      const overtone = a.createOscillator();
+      const g = a.createGain();
+      const og = a.createGain();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(freq, now + at);
+      overtone.type = "sine";
+      overtone.frequency.setValueAtTime(freq * 2, now + at);
+      g.gain.setValueAtTime(1e-4, now + at);
+      g.gain.linearRampToValueAtTime(amp, now + at + 0.012);
+      g.gain.exponentialRampToValueAtTime(6e-4, now + at + dur);
+      og.gain.setValueAtTime(1e-4, now + at);
+      og.gain.linearRampToValueAtTime(amp * 0.28, now + at + 0.01);
+      og.gain.exponentialRampToValueAtTime(4e-4, now + at + dur * 0.7);
+      osc.connect(g);
+      overtone.connect(og);
+      g.connect(bus);
+      og.connect(bus);
+      osc.start(now + at);
+      overtone.start(now + at);
+      osc.stop(now + at + dur + 0.03);
+      overtone.stop(now + at + dur * 0.7 + 0.03);
     }
-    brass(a, 783.99, 0.64, 0.62, 0.1, 4e3, bus, 9e-3);
-    brass(a, 391.99, 0.64, 0.62, 0.045, 2200, bus, 9e-3);
-    for (const [f, v] of [[130.81, 0.05], [196, 0.045], [261.63, 0.042], [329.63, 0.036], [523.25, 0.03], [659.25, 0.024]]) {
-      brass(a, f, 0.64, 0.62, v, 2400, bus);
-    }
-    bell(a, 1046.5, 0.64, 1.15, 0.05, bus);
-    bell(a, 1567.98, 0.66, 0.95, 0.028, bus);
-    noiseHit(a, 0.64, 0.85, 7600, 0.022, 1, bus);
   } catch {
   }
 }
@@ -851,8 +780,7 @@ var DEFAULT_RANDOM_MAP = {
   ships: 2,
   boats: 3,
   largeMap: true,
-  minDistance: 30,
-  randomRoads: false
+  minDistance: 0
 };
 var PX_PER_METER = 6;
 var MAX_LAKES = 16;
@@ -871,8 +799,7 @@ function normalizeRandomMap(input) {
     ships: whole(source.ships, 0, MAX_SHIPS),
     boats: whole(source.boats, 0, MAX_BOATS),
     largeMap: source.largeMap !== false,
-    minDistance: whole(source.minDistance, 0, 120),
-    randomRoads: source.randomRoads === true
+    minDistance: whole(source.minDistance, 0, 120)
   };
 }
 function validateRandomMap(input) {
@@ -1242,6 +1169,172 @@ function placeVessels(g, ships, boats, shores) {
   for (let i = 0; i < boats; i++) build("boat", i);
   return out;
 }
+function isOpenSea(p, islands, shores, g, clear) {
+  for (let idx = 0; idx < shores.length; idx++) {
+    const pts = shores[idx];
+    if (inside(p, pts) || distanceToPolygon(p, pts) < clear) return false;
+    const isl = islands[idx];
+    if (isl && p.y > isl.y && Math.abs(p.x - isl.x) < 190) {
+      const shifted = pts.map((q) => ({ x: q.x + 3, y: q.y + isl.depth + 8 }));
+      if (inside(p, shifted) || distanceToPolygon(p, shifted) < clear * 0.85) return false;
+    }
+  }
+  for (const [ia, ib] of g.links) {
+    if (distanceToLine(p, g.bs[ia], g.bs[ib]) < 42 + clear) return false;
+  }
+  return true;
+}
+function isSeaRouteSafe(pts, islands, shores, g, clear) {
+  if (pts.length < 2) return false;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    const seg = Math.hypot(b.x - a.x, b.y - a.y);
+    const steps = Math.max(1, Math.ceil(seg / 10));
+    for (let s = 0; s <= steps; s++) {
+      const t = s / steps;
+      if (!isOpenSea({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, islands, shores, g, clear)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+function buildVoyagers(g, count, islands, shores) {
+  if (count <= 0) return [];
+  const W = g.worldWidth;
+  const H = g.worldHeight;
+  const startX = -150;
+  const endX = W + 150;
+  const steps = 26;
+  const sails = ["#f3ead6", "#e8b44c", "#dfe9ef", "#f7d99c"];
+  const hulls = ["#6b4a2b", "#5c3f26", "#7a5533", "#654328"];
+  const routes = [];
+  const yCandidates = [0.5, 0.22, 0.78, 0.35, 0.65, 0.12, 0.88].map((r) => r * H);
+  const arches = [0, 58, -58, 95, -95];
+  for (const yMid of yCandidates) {
+    if (routes.length >= 2) break;
+    for (const arch of arches) {
+      const candidate = [];
+      for (let k = 0; k <= steps; k++) {
+        const u = k / steps;
+        const x = startX + u * (endX - startX);
+        const y = yMid + arch * Math.sin(Math.PI * u);
+        candidate.push({ x, y });
+      }
+      if (isSeaRouteSafe(candidate, islands, shores, g, 46) && routes.every((prev) => Math.abs(prev[Math.floor(steps / 2)].y - candidate[Math.floor(steps / 2)].y) > 95)) {
+        routes.push(candidate);
+        break;
+      }
+    }
+  }
+  const buildCoastalLane = (south, extraMargin) => {
+    const rawY = [];
+    const baseEdgeY = south ? H - 54 + extraMargin * 0.5 : 58 - extraMargin * 0.5;
+    for (let k = 0; k <= steps; k++) {
+      const u = k / steps;
+      const x = startX + u * (endX - startX);
+      let bound = baseEdgeY;
+      for (const isl of islands) {
+        const pts2 = shores.find((_, idx) => islands[idx] === isl) ?? isl.points;
+        for (const p of pts2) {
+          const dx = Math.abs(p.x - x);
+          if (dx > 135) continue;
+          const weight = Math.cos(dx / 135 * (Math.PI / 2));
+          if (south) {
+            bound = Math.max(bound, p.y + isl.depth + (48 + extraMargin) * (0.55 + 0.45 * weight));
+          } else {
+            bound = Math.min(bound, p.y - (52 + extraMargin) * (0.55 + 0.45 * weight));
+          }
+        }
+      }
+      for (const [ia, ib] of g.links) {
+        const A = g.bs[ia], B = g.bs[ib];
+        const minX = Math.min(A.x, B.x) - 90, maxX = Math.max(A.x, B.x) + 90;
+        if (x < minX || x > maxX) continue;
+        const t = Math.max(0, Math.min(1, (x - A.x) / (B.x - A.x || 1)));
+        const by = A.y + (B.y - A.y) * t;
+        if (south) bound = Math.max(bound, by + 84 + extraMargin);
+        else bound = Math.min(bound, by - 84 - extraMargin);
+      }
+      rawY.push(bound);
+    }
+    let smoothed = rawY.map((_, i) => {
+      let sum = 0, wSum = 0;
+      for (let d = -3; d <= 3; d++) {
+        const j = Math.max(0, Math.min(steps, i + d));
+        const w = 4 - Math.abs(d);
+        sum += rawY[j] * w;
+        wSum += w;
+      }
+      return sum / wSum;
+    });
+    let pts = smoothed.map((y, k) => ({ x: startX + k / steps * (endX - startX), y }));
+    for (let push = 0; push < 12 && !isSeaRouteSafe(pts, islands, shores, g, 42); push++) {
+      smoothed = smoothed.map((y) => y + (south ? 18 : -18));
+      pts = smoothed.map((y, k) => ({ x: startX + k / steps * (endX - startX), y }));
+    }
+    return pts;
+  };
+  routes.push(buildCoastalLane(true, 0));
+  routes.push(buildCoastalLane(false, 0));
+  routes.push(buildCoastalLane(true, 56));
+  const out = [];
+  const speeds = [25, 29, 22, 27];
+  const startFracs = [0.24, 0.63, 0.44, 0.81];
+  for (let i = 0; i < count; i++) {
+    const baseRoute = routes[i % routes.length];
+    const ordered = i % 2 === 0 ? baseRoute : [...baseRoute].reverse();
+    if (!isSeaRouteSafe(ordered, islands, shores, g, 38)) continue;
+    const cumLen = [0];
+    for (let k = 1; k < ordered.length; k++) {
+      cumLen.push(cumLen[k - 1] + Math.hypot(ordered[k].x - ordered[k - 1].x, ordered[k].y - ordered[k - 1].y));
+    }
+    const totalLen = cumLen[cumLen.length - 1];
+    if (totalLen < 80) continue;
+    out.push({
+      waypoints: ordered,
+      cumLen,
+      totalLen,
+      speed: speeds[i % speeds.length],
+      offset: totalLen * startFracs[i % startFracs.length],
+      scale: 0.96 + i % 3 * 0.1,
+      seed: 101 + i * 29,
+      hull: hulls[i % hulls.length],
+      sail: sails[i % sails.length]
+    });
+  }
+  return out;
+}
+function voyagerPose(v, time) {
+  const pauseGap = 90;
+  const cycle = v.totalLen + pauseGap;
+  const d = ((time * v.speed + v.offset) % cycle + cycle) % cycle;
+  if (d > v.totalLen) {
+    const last = v.waypoints[v.waypoints.length - 1];
+    const prev = v.waypoints[v.waypoints.length - 2] ?? last;
+    return { x: last.x, y: last.y, tilt: 0, dir: last.x >= prev.x ? 1 : -1, visible: false };
+  }
+  let idx = 0;
+  while (idx < v.cumLen.length - 2 && v.cumLen[idx + 1] < d) idx++;
+  const segStart = v.cumLen[idx];
+  const segLen = Math.max(1e-6, v.cumLen[idx + 1] - segStart);
+  const t = (d - segStart) / segLen;
+  const a = v.waypoints[idx];
+  const b = v.waypoints[idx + 1];
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const dir = dx >= 0 ? 1 : -1;
+  const bob = Math.sin(time * 1.45 + v.seed) * 1.7;
+  const slopeTilt = Math.max(-0.12, Math.min(0.12, dy / (Math.abs(dx) || 1) * 0.22));
+  const waveTilt = Math.sin(time * 1.05 + v.seed * 1.3) * 0.028 + slopeTilt * dir;
+  return {
+    x: a.x + dx * t,
+    y: a.y + dy * t + bob,
+    tilt: waveTilt,
+    dir,
+    visible: true
+  };
+}
 function landscapeFor(g) {
   const known = cache.get(g);
   if (known?.buildings === g.bs && known.links === g.links) return known.landscape;
@@ -1333,7 +1426,13 @@ function landscapeFor(g) {
     return { id: b.id, x: b.x, y: b.y, points, depth, theme: surface };
   }).sort((a, b) => a.y - b.y);
   const shores = islands.map((island) => island.points);
-  vessels.push(...placeVessels(g, Math.max(0, Math.min(MAX_SHIPS, g.L.ships ?? 0)), Math.max(0, Math.min(MAX_BOATS, g.L.boats ?? 0)), shores));
+  const shipSetting = g.L.ships;
+  const boatSetting = g.L.boats;
+  const localShips = Math.max(0, Math.min(MAX_SHIPS, shipSetting ?? 1));
+  const localBoats = Math.max(0, Math.min(MAX_BOATS, boatSetting ?? 2));
+  vessels.push(...placeVessels(g, localShips, localBoats, shores));
+  const voyagerCount = shipSetting === 0 ? 0 : Math.min(4, Math.max(3, shipSetting ?? 3));
+  const voyagers = buildVoyagers(g, voyagerCount, islands, shores);
   const bridges = g.links.flatMap(([a, b]) => bridgeWaterSpans(g.bs[a], g.bs[b], shores));
   const roads = [];
   for (const [ia, ib] of g.links) {
@@ -1357,7 +1456,7 @@ function landscapeFor(g) {
       cursor = Math.max(cursor, t1);
     }
   }
-  const landscape = { islands, scenery, hills, vessels, roads, bridges, theme };
+  const landscape = { islands, scenery, hills, vessels, voyagers, roads, bridges, theme };
   cache.set(g, { buildings: g.bs, links: g.links, landscape });
   return landscape;
 }
@@ -1636,9 +1735,50 @@ function paintVessel(c, v, pose) {
   c.fill();
   c.restore();
 }
+function drawVoyager(c, v, time) {
+  const pose = voyagerPose(v, time);
+  if (!pose.visible) return;
+  const s = v.scale;
+  const x = pose.x;
+  const y = pose.y;
+  const dir = pose.dir;
+  c.save();
+  c.strokeStyle = "rgba(206,250,236,.26)";
+  c.lineWidth = 1.6 * s;
+  c.beginPath();
+  c.moveTo(x - dir * 18 * s, y + 1 * s);
+  c.quadraticCurveTo(x - dir * 36 * s, y - 4 * s, x - dir * 56 * s, y - 8 * s);
+  c.moveTo(x - dir * 18 * s, y + 3 * s);
+  c.quadraticCurveTo(x - dir * 36 * s, y + 8 * s, x - dir * 56 * s, y + 12 * s);
+  c.stroke();
+  c.translate(x, y);
+  if (dir < 0) c.scale(-1, 1);
+  if (Math.abs(pose.tilt) > 1e-4) c.rotate(pose.tilt * 0.45);
+  c.translate(-x, -y);
+  paintVessel(
+    c,
+    {
+      kind: "ship",
+      x,
+      y,
+      scale: s,
+      seed: v.seed,
+      hull: v.hull,
+      sail: v.sail,
+      cruise: true,
+      driftX: 0,
+      driftY: 0,
+      spin: 1,
+      phase: 0
+    },
+    { x, y, tilt: pose.tilt, moving: true }
+  );
+  c.restore();
+}
 function drawTerrain(c, g, time) {
-  const { islands, bridges, hills, vessels } = landscapeFor(g);
+  const { islands, bridges, hills, vessels, voyagers } = landscapeFor(g);
   for (const vessel of vessels) drawVessel(c, vessel, time);
+  for (const ship of voyagers) drawVoyager(c, ship, time);
   for (const island of islands) {
     polygon(c, island.points.map((p) => ({ x: p.x + 10, y: p.y + island.depth + 5 })), "rgba(6,40,40,.22)");
     c.strokeStyle = `rgba(121,228,202,${0.12 + Math.sin(time * 1.1 + island.id) * 0.04})`;
@@ -1973,20 +2113,20 @@ function drawTowerRanges(c, g, time = 0) {
     c.lineWidth = (focus ? 3 : 2) / scale;
     c.stroke();
     c.setLineDash([]);
+    const sweepAngle = time * (g.haloSpin ?? DEFAULT_HALO_SPIN) + b.id;
+    for (let k = 0; k < 3; k++) {
+      const a0 = sweepAngle + k / 3 * Math.PI * 2;
+      const px = b.x + Math.cos(a0) * CFG.range, py = b.y + Math.sin(a0) * CFG.range;
+      const spark = c.createRadialGradient(px, py, 0, px, py, 26 / scale);
+      spark.addColorStop(0, "#ffffff" + (focus ? "aa" : active ? "77" : "66"));
+      spark.addColorStop(0.35, color + (active ? "88" : "66"));
+      spark.addColorStop(1, color + "00");
+      c.fillStyle = spark;
+      c.beginPath();
+      c.arc(px, py, 26 / scale, 0, Math.PI * 2);
+      c.fill();
+    }
     if (active) {
-      const sweepAngle = time * (g.haloSpin ?? 1.35) + b.id;
-      for (let k = 0; k < 3; k++) {
-        const a0 = sweepAngle + k / 3 * Math.PI * 2;
-        const px = b.x + Math.cos(a0) * CFG.range, py = b.y + Math.sin(a0) * CFG.range;
-        const spark = c.createRadialGradient(px, py, 0, px, py, 26 / scale);
-        spark.addColorStop(0, "#ffffff" + (focus ? "aa" : "77"));
-        spark.addColorStop(0.35, color + "88");
-        spark.addColorStop(1, color + "00");
-        c.fillStyle = spark;
-        c.beginPath();
-        c.arc(px, py, 26 / scale, 0, Math.PI * 2);
-        c.fill();
-      }
       c.fillStyle = color + (focus ? "1c" : "0e");
       c.beginPath();
       c.arc(b.x, b.y, CFG.range, 0, Math.PI * 2);
@@ -2064,10 +2204,6 @@ var Game = class {
     __publicField(this, "openRoads", true);
     /** حداقل فاصلهٔ پل بین دو قلعهٔ همسایه (پیکسل) */
     __publicField(this, "minRoadLength", 0);
-    /** اگر روشن باشد، راه‌ها کاملاً رندوم انتخاب می‌شوند. */
-    __publicField(this, "randomRoads", false);
-    /** مولد اعداد تصادفیِ قابل‌کنترل، تا نقشهٔ رندوم بازتولیدپذیر بماند. */
-    __publicField(this, "roadRandom", Math.random);
     /** تایمر کاهش هر ثانیه ۱ نیرو برای قلعه‌های فراتر از سقف */
     __publicField(this, "decayTimer", 0);
     __publicField(this, "shake", 0);
@@ -2083,9 +2219,9 @@ var Game = class {
     __publicField(this, "worldHeight", CFG.H);
     __publicField(this, "largeMap", false);
     /** سرعتِ چرخشِ نورهای دور برج (صفر = بی‌حرکت) */
-    __publicField(this, "haloSpin", 1.35);
+    __publicField(this, "haloSpin", DEFAULT_HALO_SPIN);
     /** شفافیتِ نقطه‌چینِ مسیر حمله (۰..۱) */
-    __publicField(this, "attackDash", 1);
+    __publicField(this, "attackDash", DEFAULT_ATTACK_DASH);
     /** مقیاسِ اندازهٔ کوه‌های دریایی (از تنظیماتِ سراسری) — فقط ظاهر */
     /** ارتفاعِ نوارِ بالای صفحه (پیکسل) که نقشه نباید زیرش برود */
     __publicField(this, "hudInset", 0);
@@ -2177,12 +2313,7 @@ var Game = class {
     for (const [a, b, d] of pairs) {
       if (d < minLength) continue;
       if (this.links.length >= linkCap) break;
-      if (this.randomRoads) {
-        if (this.roadRandom() < 0.3 && this.links.length < linkCap) {
-          this.links.push([a, b]);
-          u[f(a)] = f(b);
-        }
-      } else if (f(a) !== f(b)) {
+      if (f(a) !== f(b)) {
         u[f(a)] = f(b);
         this.links.push([a, b]);
       } else if (!this.largeMap && d < 300) {
@@ -2262,11 +2393,10 @@ var Game = class {
    * زده می‌شد و هر تغییرِ تنظیمات کلِ نبرد را از صفر می‌کرد.)
    */
   setRoadRules(options) {
-    const before = { openRoads: this.openRoads, minRoadLength: this.minRoadLength, randomRoads: this.randomRoads };
+    const before = { openRoads: this.openRoads, minRoadLength: this.minRoadLength };
     if (options.openRoads !== void 0) this.openRoads = options.openRoads;
     if (options.minRoadLength !== void 0) this.minRoadLength = Math.max(0, Math.min(900, Math.floor(options.minRoadLength)));
-    if (options.randomRoads !== void 0) this.randomRoads = options.randomRoads;
-    const changed = before.openRoads !== this.openRoads || before.minRoadLength !== this.minRoadLength || before.randomRoads !== this.randomRoads;
+    const changed = before.openRoads !== this.openRoads || before.minRoadLength !== this.minRoadLength;
     if (changed) this.rebuildRoads();
   }
   setMaxTroops(value) {
@@ -2401,30 +2531,30 @@ var Game = class {
     }
     const m = defOf(t);
     const dv = armyPower(t.army) * m;
-    t.hit = 1;
-    this.fxAdd({ k: "ring", x: t.x, y: t.y, c: "#ffffff", l: 0.6 });
-    this.shake = Math.min(1, this.shake + 0.35);
     if (s.hp > dv + 1e-8) {
       const prev = t.o;
       t.o = s.o;
       t.army = emptyArmy();
       t.army[s.unit] = s.hp - dv;
       t.pt = 0;
-      t.fl = 1;
+      t.hit = 0.5;
+      t.fl = 0.72;
       t.lvl = 1;
       t.cap = Math.min(CFG.capStart, this.baseCap);
       t.capTimer = 0;
-      this.fxAdd({ k: "ring", x: t.x, y: t.y, c: COL[s.o], l: 0.95, r: 90 });
-      this.fxAdd({ k: "burst", x: t.x, y: t.y - 10, c: COL[s.o], l: 0.7 });
+      this.shake = Math.min(0.65, this.shake + 0.18);
+      this.fxAdd({ k: "capture", x: t.x, y: t.y, c: COL[s.o], l: 1.05, r: 86 });
       if (s.o === 1) {
         this.onToast(prev === 0 ? "ساختمان تصرف شد!" : "ساختمان دشمن گرفته شد!");
         sfx.capture();
-        playCaptureSound();
       } else if (prev === 1) {
         this.onToast("یک ساختمان را از دست دادی!");
         sfx.lose();
       }
     } else {
+      t.hit = 0.85;
+      this.shake = Math.min(0.8, this.shake + 0.24);
+      this.fxAdd({ k: "ring", x: t.x, y: t.y + 8, c: "#ffffff", l: 0.5, r: 46 });
       const before = t.tr;
       damageArmy(t.army, s.hp / m);
       const lost = before - t.tr;
@@ -3060,7 +3190,7 @@ function drawStructure(c, b, time, focused) {
     for (const side of [-1, 1]) {
       polygon(c, [{ x: X + side * 24, y: Y - 32 }, { x: X + side * 29, y: Y - 60 }, { x: X + side * 19, y: Y - 51 }, { x: X + side * 16, y: Y - 34 }], side === -1 ? "#dfebd6" : "#8baca4");
     }
-    const bob = b.o ? Math.sin(time * 2.2 + b.id) * 2 : 0;
+    const bob = Math.sin(time * 2.2 + b.id) * 2;
     {
       const pulse = 0.5 + 0.5 * Math.sin(time * 2.4 + b.id);
       const radius = 44 + pulse * 9;
@@ -3071,8 +3201,8 @@ function drawStructure(c, b, time, focused) {
         glow.addColorStop(0.6, color + (pulse > 0.5 ? "2c" : "22"));
         glow.addColorStop(1, color + "00");
       } else {
-        glow.addColorStop(0, "#b7cdca55");
-        glow.addColorStop(0.4, "#b7cdca22");
+        glow.addColorStop(0, "#e2eef07a");
+        glow.addColorStop(0.35, "#b7cdca3d");
         glow.addColorStop(1, "#b7cdca00");
       }
       c.save();
@@ -3081,13 +3211,12 @@ function drawStructure(c, b, time, focused) {
       c.beginPath();
       c.arc(X, Y - 57, radius, 0, Math.PI * 2);
       c.fill();
-      if (b.o) {
-        c.strokeStyle = color + (pulse > 0.5 ? "4d" : "33");
-        c.lineWidth = 1.8;
-        c.beginPath();
-        c.arc(X, Y - 57, 34 + pulse * 5, 0, Math.PI * 2);
-        c.stroke();
-      }
+      const ringCol = b.o ? color : "#d0dde0";
+      c.strokeStyle = ringCol + (pulse > 0.5 ? "4d" : "30");
+      c.lineWidth = 1.8;
+      c.beginPath();
+      c.arc(X, Y - 57, 34 + pulse * 5, 0, Math.PI * 2);
+      c.stroke();
       c.restore();
     }
     crystal(c, X, Y - 38 + bob, 28, 53, b.o ? color : "#9db9b8");
@@ -3148,17 +3277,28 @@ function drawB(c, g, b, T) {
   }
   drawStructure(c, b, T, isSel || isDraft || g.hover === b);
   if (b.hit > 0) {
-    c.strokeStyle = `rgba(255,90,80,${b.hit * 0.9})`;
-    c.lineWidth = 5;
+    const h = Math.max(0, Math.min(1, b.hit));
+    const rx = 40 + (1 - h) * 16;
+    c.strokeStyle = `rgba(255,108,92,${(h * 0.72).toFixed(3)})`;
+    c.lineWidth = 2.6 * h + 0.8;
     c.beginPath();
-    c.arc(X, Y, 46 + (1 - b.hit) * 16, 0, 7);
+    c.ellipse(X, Y + 9, rx, rx * 0.5, 0, 0, Math.PI * 2);
     c.stroke();
   }
   if (b.fl > 0) {
-    c.fillStyle = `rgba(255,255,255,${b.fl * 0.65})`;
+    const fl = Math.max(0, Math.min(1, b.fl));
+    const col = COL[b.o] || "#ffffff";
+    c.save();
+    c.globalCompositeOperation = "lighter";
+    const glow = c.createRadialGradient(X, Y - 20, 4, X, Y - 20, 52);
+    glow.addColorStop(0, withAlpha("#ffffff", fl * 0.28));
+    glow.addColorStop(0.45, withAlpha(tint(col, 42), fl * 0.2));
+    glow.addColorStop(1, withAlpha(col, 0));
+    c.fillStyle = glow;
     c.beginPath();
-    c.arc(X, Y, 50, 0, 7);
+    c.arc(X, Y - 20, 52, 0, Math.PI * 2);
     c.fill();
+    c.restore();
   }
   if (isTarget && g.preview?.sources.length) drawTargetMark(c, g.preview, T, dashAlpha(g));
 }
@@ -3372,6 +3512,90 @@ function arrows(c, g, T) {
     c.restore();
   }
 }
+function drawCaptureEffect(c, f, p) {
+  const clamped = Math.max(0, Math.min(1, p));
+  const ease = 1 - Math.pow(1 - clamped, 3);
+  const fade = Math.pow(1 - clamped, 1.4);
+  const maxR = f.r || 86;
+  const bright = tint(f.c, 56);
+  const gold = "#ffe8a3";
+  const gy = f.y + 9;
+  c.save();
+  c.save();
+  c.translate(f.x, gy);
+  c.scale(1, 0.5);
+  const groundGlow = c.createRadialGradient(0, 0, 8, 0, 0, maxR);
+  groundGlow.addColorStop(0, withAlpha(bright, 0.22 * fade));
+  groundGlow.addColorStop(0.55, withAlpha(f.c, 0.16 * fade));
+  groundGlow.addColorStop(1, withAlpha(f.c, 0));
+  c.fillStyle = groundGlow;
+  c.beginPath();
+  c.arc(0, 0, maxR, 0, Math.PI * 2);
+  c.fill();
+  c.restore();
+  const rx1 = 30 + ease * (maxR - 30);
+  c.strokeStyle = withAlpha(f.c, 0.85 * fade);
+  c.lineWidth = 3 * (1 - clamped) + 0.9;
+  c.beginPath();
+  c.ellipse(f.x, gy, rx1, rx1 * 0.5, 0, 0, Math.PI * 2);
+  c.stroke();
+  if (clamped > 0.05) {
+    const p2 = Math.min(1, (clamped - 0.05) / 0.9);
+    const ease2 = 1 - Math.pow(1 - p2, 3);
+    const fade2 = Math.pow(1 - p2, 1.5);
+    const rx2 = 22 + ease2 * (maxR * 0.76 - 22);
+    c.strokeStyle = withAlpha(gold, 0.72 * fade2);
+    c.lineWidth = 1.9 * (1 - p2) + 0.6;
+    c.beginPath();
+    c.ellipse(f.x, gy, rx2, rx2 * 0.5, 0, 0, Math.PI * 2);
+    c.stroke();
+  }
+  const beamEnvelope = clamped < 0.18 ? clamped / 0.18 : Math.pow(Math.max(0, 1 - (clamped - 0.18) / 0.82), 1.85);
+  if (beamEnvelope > 5e-3) {
+    c.save();
+    c.globalCompositeOperation = "lighter";
+    c.translate(f.x, f.y - 26);
+    c.scale(0.62, 1.15);
+    const auraR = 46 + ease * 10;
+    const beam = c.createRadialGradient(0, 0, 3, 0, 0, auraR);
+    beam.addColorStop(0, withAlpha("#ffffff", 0.3 * beamEnvelope));
+    beam.addColorStop(0.4, withAlpha(bright, 0.24 * beamEnvelope));
+    beam.addColorStop(1, withAlpha(f.c, 0));
+    c.fillStyle = beam;
+    c.beginPath();
+    c.arc(0, 0, auraR, 0, Math.PI * 2);
+    c.fill();
+    c.restore();
+  }
+  const moteCount = 10;
+  for (let k = 0; k < moteCount; k++) {
+    const delay = k % 4 * 0.045;
+    if (clamped <= delay) continue;
+    const mp = Math.min(1, (clamped - delay) / (1 - delay));
+    const mEase = 1 - Math.pow(1 - mp, 2.4);
+    const mAlpha = Math.sin(Math.min(1, mp) * Math.PI) * 0.92;
+    if (mAlpha <= 0.02) continue;
+    const baseAng = k / moteCount * Math.PI * 2 + 0.35;
+    const swirl = baseAng + mEase * 0.55;
+    const orbitR = 22 + k % 3 * 7 + mEase * 12;
+    const mx = f.x + Math.cos(swirl) * orbitR;
+    const my = f.y - 8 + Math.sin(swirl) * orbitR * 0.46 - mEase * (44 + k % 3 * 13);
+    const sz = (5.2 - k % 3 * 0.75) * (1 - mp * 0.65);
+    const col = k % 2 === 0 ? bright : gold;
+    c.globalAlpha = mAlpha;
+    polygon(
+      c,
+      [
+        { x: mx, y: my - sz * 1.35 },
+        { x: mx + sz * 0.85, y: my },
+        { x: mx, y: my + sz * 1.35 },
+        { x: mx - sz * 0.85, y: my }
+      ],
+      col
+    );
+  }
+  c.restore();
+}
 function withAlpha(hex, a) {
   const h = hex.replace("#", "");
   const n = parseInt(h.length === 3 ? h.split("").map((x) => x + x).join("") : h, 16);
@@ -3484,7 +3708,11 @@ function render(c, g, T, W, H, dpr) {
   ];
   drawables.sort((a, b) => a.y - b.y).forEach((item) => item.draw());
   for (const f of g.fx) {
-    const p = f.t / f.l;
+    const p = Math.max(0, Math.min(1, f.t / f.l));
+    if (f.k === "capture") {
+      drawCaptureEffect(c, f, p);
+      continue;
+    }
     c.globalAlpha = Math.max(0, 1 - p);
     if (f.k === "txt") {
       c.font = "900 22px " + F_BODY;
@@ -3496,21 +3724,34 @@ function render(c, g, T, W, H, dpr) {
       c.fillStyle = f.c;
       c.fillText(f.s || "", f.x, f.y - p * 36);
     } else if (f.k === "burst") {
-      const R = (f.r || 40) * (0.3 + p);
-      c.strokeStyle = f.c;
-      c.lineWidth = 4 * (1 - p) + 1;
+      const ease = 1 - Math.pow(1 - p, 2.5);
+      const R = (f.r || 40) * (0.25 + ease * 0.85);
       for (let k = 0; k < 8; k++) {
-        const a = k / 8 * Math.PI * 2 + p * 1.4;
-        c.beginPath();
-        c.moveTo(f.x + Math.cos(a) * R * 0.35, f.y + Math.sin(a) * R * 0.35);
-        c.lineTo(f.x + Math.cos(a) * R, f.y + Math.sin(a) * R);
-        c.stroke();
+        const a = k / 8 * Math.PI * 2 + ease * 0.6;
+        const r0 = R * 0.32;
+        const r1 = R * (0.9 + k % 2 * 0.14);
+        const mid = (r0 + r1) * 0.5;
+        const w = 2.6 * (1 - p);
+        const nx = -Math.sin(a) * w;
+        const ny = Math.cos(a) * w;
+        polygon(
+          c,
+          [
+            { x: f.x + Math.cos(a) * r0, y: f.y + Math.sin(a) * r0 },
+            { x: f.x + Math.cos(a) * mid + nx, y: f.y + Math.sin(a) * mid + ny },
+            { x: f.x + Math.cos(a) * r1, y: f.y + Math.sin(a) * r1 },
+            { x: f.x + Math.cos(a) * mid - nx, y: f.y + Math.sin(a) * mid - ny }
+          ],
+          k % 2 === 0 ? f.c : tint(f.c, 45)
+        );
       }
     } else {
+      const ease = 1 - Math.pow(1 - p, 2.6);
+      const rx = 14 + ease * (f.r || 56);
       c.strokeStyle = f.c;
-      c.lineWidth = 6 * (1 - p) + 1;
+      c.lineWidth = 3.2 * (1 - p) + 0.8;
       c.beginPath();
-      c.arc(f.x, f.y, 12 + p * (f.r || 62), 0, 7);
+      c.ellipse(f.x, f.y, rx, rx * 0.52, 0, 0, Math.PI * 2);
       c.stroke();
     }
     c.globalAlpha = 1;
@@ -3540,13 +3781,13 @@ var DEFAULT_GLOBAL_SETTINGS = {
   battleMode: "field",
   maxTroops: 50,
   openRoads: true,
-  minCastleDistance: 30,
+  minCastleDistance: 0,
   ambientSound: true,
   marchSound: true,
   unitTuning: DEFAULT_UNIT_TUNING,
   haloSpin: DEFAULT_HALO_SPIN,
   attackDash: DEFAULT_ATTACK_DASH,
-  volumes: Object.fromEntries(SFX_KEYS.map((k) => [k, 1]))
+  volumes: { ...DEFAULT_SFX_VOLUMES }
 };
 function writeJSON(key, value) {
   try {
@@ -3631,7 +3872,7 @@ function normalizeGlobalSettings(raw) {
   base.maxTroops = VALID_CAPS.includes(cap) ? cap : Number.isFinite(cap) && cap >= 1 && cap <= 1e3 ? Math.floor(cap) : 50;
   base.openRoads = base.openRoads === true;
   const dist = Number(base.minCastleDistance);
-  base.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 30;
+  base.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 0;
   base.ambientSound = base.ambientSound !== false;
   base.marchSound = base.marchSound !== false;
   base.snd = base.snd !== false;
@@ -3644,7 +3885,7 @@ function normalizeGlobalSettings(raw) {
   base.volumes = Object.fromEntries(
     SFX_KEYS.map((key) => {
       const v = Number(rawVolumes[key]);
-      return [key, Number.isFinite(v) ? Math.max(0, Math.min(1, Math.round(v * 100) / 100)) : 1];
+      return [key, Number.isFinite(v) ? Math.max(0, Math.min(1, Math.round(v * 100) / 100)) : DEFAULT_SFX_VOLUMES[key]];
     })
   );
   return base;
@@ -3690,6 +3931,7 @@ function loadMapSettings() {
     const clean2 = normalizeRandomMap(source.customMap ?? source);
     mapExtras = pickExtras(source.customMap ?? source, Object.keys(DEFAULT_RANDOM_MAP));
     delete mapExtras.mountains;
+    delete mapExtras.randomRoads;
     const merged = { ...mapExtras, ...clean2 };
     if (found.key !== MAP_KEY || JSON.stringify(merged) !== JSON.stringify(found.parsed)) {
       writeWithBackup(MAP_KEY, MAP_BACKUP, merged);
@@ -3905,12 +4147,6 @@ function importSettingsJson(text, current) {
     recognized++;
     touchedMap = true;
   }
-  const randRoadsProp = readProp(mapSource, "randomRoads", "RandomRoads");
-  if (randRoadsProp.found && typeof randRoadsProp.value === "boolean") {
-    draftMap.randomRoads = randRoadsProp.value;
-    recognized++;
-    touchedMap = true;
-  }
   if (recognized === 0) {
     return { ok: false, error: "هیچ تنظیم شناخته‌شده‌ای در این کد یا فایل پیدا نشد." };
   }
@@ -3991,9 +4227,12 @@ var defaultSettings = {
   maxTroopsCap: 50,
   customMap: DEFAULT_RANDOM_MAP,
   openRoads: true,
-  minCastleDistance: 30,
+  minCastleDistance: 0,
   ambientSound: true,
-  marchSound: true
+  marchSound: true,
+  haloSpin: DEFAULT_HALO_SPIN,
+  attackDash: DEFAULT_ATTACK_DASH,
+  volumes: { ...DEFAULT_SFX_VOLUMES }
 };
 function extractUnitTuning(raw) {
   const t = raw && typeof raw === "object" ? raw : {};
@@ -4018,7 +4257,7 @@ function normalize(input) {
   settings.customMap = normalizeRandomMap(settings.customMap);
   settings.openRoads = settings.openRoads === true;
   const dist = Number(settings.minCastleDistance);
-  settings.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 30;
+  settings.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 0;
   settings.ambientSound = settings.ambientSound !== false;
   settings.marchSound = settings.marchSound !== false;
   const tuned = extractUnitTuning(settings.troopTuning);
@@ -4083,7 +4322,10 @@ function blazorToSave(input) {
   const s = normalize(input);
   const done = Array.from({ length: 30 }, (_, idx) => s.completedLevels.includes(idx));
   const volumes2 = Object.fromEntries(
-    SFX_KEYS.map((key) => [key, Number.isFinite(Number(s.volumes?.[key])) ? Number(s.volumes[key]) : 1])
+    SFX_KEYS.map((key) => [
+      key,
+      Number.isFinite(Number(s.volumes?.[key])) ? Number(s.volumes[key]) : DEFAULT_SFX_VOLUMES[key]
+    ])
   );
   const global = normalizeGlobalSettings({
     unlocked: s.unlockedLevel,
@@ -4115,7 +4357,6 @@ function saveToBlazor(save, current) {
     customMap: save.customMap,
     openRoads: save.openRoads,
     minCastleDistance: save.minCastleDistance,
-    randomRoads: save.customMap.randomRoads,
     ambientSound: save.ambientSound,
     marchSound: save.marchSound,
     troopTuning: {
@@ -4206,8 +4447,7 @@ function applyRules(s) {
   g.setMaxTroops(s.settings.maxTroopsCap);
   g.setRoadRules({
     openRoads: s.settings.openRoads,
-    minRoadLength: s.settings.minCastleDistance * PX_PER_METER,
-    randomRoads: s.settings.customMap.randomRoads
+    minRoadLength: s.settings.minCastleDistance * PX_PER_METER
   });
   applyUnitTuning(extractUnitTuning(s.settings.troopTuning));
   g.haloSpin = normalizeHaloSpin(s.settings.haloSpin);

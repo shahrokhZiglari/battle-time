@@ -148,7 +148,10 @@ check("مقدارِ منفی روی ۰ بسته می‌شود", count.osc === 0 
 setSfxVolumes(undefined);
 reset();
 sfx.select();
-check("نبودِ تنظیمات یعنی بلندیِ کامل (پیش‌فرض)", Math.abs(maxGain() - 0.045) < 1e-6, String(maxGain()));
+check("نبودِ تنظیمات برای سایر صداها یعنی ۱۰۰٪ (پیش‌فرض)", Math.abs(maxGain() - 0.045) < 1e-6, String(maxGain()));
+reset();
+sfx.capture();
+check("پیش‌فرضِ بلندیِ صدای «فتح» ۱۰٪ است", Math.abs(maxGain() - 0.042) < 1e-6, String(maxGain()));
 
 /* ۶) خاموشیِ کلیِ صدا */
 setSfxVolumes(Object.fromEntries(SFX_KEYS.map((k) => [k, 1])));

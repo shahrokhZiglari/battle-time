@@ -7,16 +7,16 @@ import { setSound } from "../src/game/sound";
 
 setSound(false);
 
-// 1) سرعت سرباز سریع ۱٫۵ برابر عادی است، نه ۲ برابر.
+// 1) سرعت و قدرت پیش‌فرض: عادی ۰٫۹، سریع ۱٫۳، سنگین ۰٫۷.
 {
   assert.equal(UNITS.fast.power, UNITS.normal.power, "fast power stays 1");
-  assert.ok(Math.abs(UNITS.fast.speed - 1.5) < 1e-9, `fast speed is ${UNITS.fast.speed}`);
-  assert.ok(Math.abs(UNITS.fast.speed / UNITS.normal.speed - 1.5) < 1e-9);
-  assert.ok(Math.abs(UNITS.heavy.speed - 2 / 3) < 1e-9, "heavy speed is unchanged");
-  console.log("PASS: fast soldiers move 1.5x the normal speed; heavy remains 2/3.");
+  assert.ok(Math.abs(UNITS.normal.speed - 0.9) < 1e-9, `normal speed is ${UNITS.normal.speed}`);
+  assert.ok(Math.abs(UNITS.fast.speed - 1.3) < 1e-9, `fast speed is ${UNITS.fast.speed}`);
+  assert.ok(Math.abs(UNITS.heavy.speed - 0.7) < 1e-9, "heavy speed is 0.7");
+  console.log("PASS: default speeds are normal=0.9, fast=1.3, heavy=0.7.");
 }
 
-// 2) مسافت واقعی طی‌شده در زمان برابر، ۱٫۵ برابر است.
+// 2) مسافت واقعی طی‌شده در زمان برابر با نسبت سرعت‌ها (۱٫۳ به ۰٫۹) متناسب است.
 {
   const travelled = (owner: Owner, type: "normal" | "fast") => {
     const g = new Game(0);
@@ -32,7 +32,7 @@ setSound(false);
   };
   const normal = travelled(1, "normal");
   const fast = travelled(1, "fast");
-  assert.ok(Math.abs(fast / normal - 1.5) < 0.02, `fast/normal = ${(fast / normal).toFixed(2)}`);
+  assert.ok(Math.abs(fast / normal - 1.3 / 0.9) < 0.02, `fast/normal = ${(fast / normal).toFixed(2)}`);
   console.log(`PASS: in equal time fast soldiers cover ${(fast / normal).toFixed(2)}x the normal distance.`);
 }
 

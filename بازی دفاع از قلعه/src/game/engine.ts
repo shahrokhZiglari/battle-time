@@ -1,6 +1,6 @@
-import { Building, CFG, COL, defOf, Effect, fa, Level, LEVELS, Owner, Squad, TROOP_TYPES, UNITS } from "./config";
+import { Building, CFG, COL, DEFAULT_ATTACK_DASH, DEFAULT_HALO_SPIN, defOf, Effect, fa, Level, LEVELS, Owner, Squad, TROOP_TYPES, UNITS } from "./config";
 import { sfx } from "./sound";
-import { playCaptureSound, setNatureSound } from "./nature-audio";
+import { setNatureSound } from "./nature-audio";
 import { addUnit, armyCount, armyPower, createArmy, damageArmy, emptyArmy, producedUnit, selectArmy, takeArmy, unitCount } from "./troops";
 import { landscapeFor } from "./terrain";
 import { buildMarchPath, pathLength, samplePath } from "./navigation";
@@ -76,10 +76,6 @@ export class Game {
   openRoads = true;
   /** حداقل فاصلهٔ پل بین دو قلعهٔ همسایه (پیکسل) */
   minRoadLength = 0;
-  /** اگر روشن باشد، راه‌ها کاملاً رندوم انتخاب می‌شوند. */
-  randomRoads = false;
-  /** مولد اعداد تصادفیِ قابل‌کنترل، تا نقشهٔ رندوم بازتولیدپذیر بماند. */
-  roadRandom: () => number = Math.random;
   /** تایمر کاهش هر ثانیه ۱ نیرو برای قلعه‌های فراتر از سقف */
   decayTimer = 0;
   shake = 0;
@@ -95,9 +91,9 @@ export class Game {
   worldHeight = CFG.H;
   largeMap = false;
   /** سرعتِ چرخشِ نورهای دور برج (صفر = بی‌حرکت) */
-  haloSpin = 1.35;
+  haloSpin = DEFAULT_HALO_SPIN;
   /** شفافیتِ نقطه‌چینِ مسیر حمله (۰..۱) */
-  attackDash = 1;
+  attackDash = DEFAULT_ATTACK_DASH;
   /** مقیاسِ اندازهٔ کوه‌های دریایی (از تنظیماتِ سراسری) — فقط ظاهر */
   /** ارتفاعِ نوارِ بالای صفحه (پیکسل) که نقشه نباید زیرش برود */
   hudInset = 0;
@@ -189,13 +185,7 @@ export class Game {
     for (const [a, b, d] of pairs) {
       if (d < minLength) continue;
       if (this.links.length >= linkCap) break;
-      if (this.randomRoads) {
-        // راه‌های رندوم: با شانس برابر؛ درخت اتصال در پایان تکمیل می‌شود.
-        if (this.roadRandom() < 0.3 && this.links.length < linkCap) {
-          this.links.push([a, b]);
-          u[f(a)] = f(b);
-        }
-      } else if (f(a) !== f(b)) {
+      if (f(a) !== f(b)) {
         u[f(a)] = f(b);
         this.links.push([a, b]);
       } else if (!this.largeMap && d < 300) {
@@ -269,15 +259,13 @@ export class Game {
    * تایمرها و وضعیتِ برد/باخت دست‌نخورده می‌مانند. (پیش‌تر اینجا build() صدا
    * زده می‌شد و هر تغییرِ تنظیمات کلِ نبرد را از صفر می‌کرد.)
    */
-  setRoadRules(options: { openRoads?: boolean; minRoadLength?: number; randomRoads?: boolean }) {
-    const before = { openRoads: this.openRoads, minRoadLength: this.minRoadLength, randomRoads: this.randomRoads };
+  setRoadRules(options: { openRoads?: boolean; minRoadLength?: number }) {
+    const before = { openRoads: this.openRoads, minRoadLength: this.minRoadLength };
     if (options.openRoads !== undefined) this.openRoads = options.openRoads;
     if (options.minRoadLength !== undefined) this.minRoadLength = Math.max(0, Math.min(900, Math.floor(options.minRoadLength)));
-    if (options.randomRoads !== undefined) this.randomRoads = options.randomRoads;
     const changed =
       before.openRoads !== this.openRoads ||
-      before.minRoadLength !== this.minRoadLength ||
-      before.randomRoads !== this.randomRoads;
+      before.minRoadLength !== this.minRoadLength;
     if (changed) this.rebuildRoads();
   }
 
@@ -413,30 +401,30 @@ export class Game {
     }
     const m = defOf(t);
     const dv = armyPower(t.army) * m;
-    t.hit = 1;
-    this.fxAdd({ k: "ring", x: t.x, y: t.y, c: "#ffffff", l: 0.6 });
-    this.shake = Math.min(1, this.shake + 0.35);
     if (s.hp > dv + 1e-8) {
       const prev = t.o;
       t.o = s.o;
       t.army = emptyArmy();
       t.army[s.unit] = s.hp - dv;
       t.pt = 0;
-      t.fl = 1;
+      t.hit = 0.5;
+      t.fl = 0.72;
       t.lvl = 1;
       t.cap = Math.min(CFG.capStart, this.baseCap);
       t.capTimer = 0;
-      this.fxAdd({ k: "ring", x: t.x, y: t.y, c: COL[s.o], l: 0.95, r: 90 });
-      this.fxAdd({ k: "burst", x: t.x, y: t.y - 10, c: COL[s.o], l: 0.7 });
+      this.shake = Math.min(0.65, this.shake + 0.18);
+      this.fxAdd({ k: "capture", x: t.x, y: t.y, c: COL[s.o], l: 1.05, r: 86 });
       if (s.o === 1) {
         this.onToast(prev === 0 ? "ساختمان تصرف شد!" : "ساختمان دشمن گرفته شد!");
         sfx.capture();
-        playCaptureSound();
       } else if (prev === 1) {
         this.onToast("یک ساختمان را از دست دادی!");
         sfx.lose();
       }
     } else {
+      t.hit = 0.85;
+      this.shake = Math.min(0.8, this.shake + 0.24);
+      this.fxAdd({ k: "ring", x: t.x, y: t.y + 8, c: "#ffffff", l: 0.5, r: 46 });
       const before = t.tr;
       damageArmy(t.army, s.hp / m);
       const lost = before - t.tr;

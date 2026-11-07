@@ -101,14 +101,14 @@ export default function Hud({
 
           <span className="h-4 w-px shrink-0 bg-white/15" />
 
-          {/* توان رزمی — نوارِ باریک */}
+          {/* توان رزمی — نوارِ توازن با عرض ۲ برابر */}
           <span
-            className="flex shrink-0 items-center gap-1"
+            className="flex shrink-0 items-center gap-1.5"
             title={d.factions.map((f) => `${f.name}: ${fa(f.troops)} نفر`).join(" · ")}
             aria-label="توان رزمی بازیکنان"
           >
-            <span className="hidden text-[10px] text-ash md:inline">توان</span>
-            <span className="flex h-2 w-12 overflow-hidden rounded-full bg-black/45 sm:w-24" dir="ltr">
+            <span className="hidden text-[10px] text-ash md:inline">توازن</span>
+            <span className="flex h-2.5 w-24 overflow-hidden rounded-full bg-black/50 ring-1 ring-white/10 sm:w-48 md:w-56" dir="ltr">
               {d.factions.map((f) => (
                 <span
                   key={f.id}

@@ -1,4 +1,4 @@
-import { CFG, COL, type Building, type Point } from "./config";
+import { CFG, COL, DEFAULT_HALO_SPIN, type Building, type Point } from "./config";
 import type { Game } from "./engine";
 import type { Context } from "./scene-geometry";
 
@@ -49,19 +49,20 @@ export function drawTowerRanges(c: Context, g: Game, time = 0) {
     c.stroke();
     c.setLineDash([]);
 
+    /* نورهای چرخان روی حلقه — هم برای برجِ متصرف‌شده و هم برای برجِ خالی (خنثی) */
+    const sweepAngle = time * (g.haloSpin ?? DEFAULT_HALO_SPIN) + b.id;
+    for (let k = 0; k < 3; k++) {
+      const a0 = sweepAngle + (k / 3) * Math.PI * 2;
+      const px = b.x + Math.cos(a0) * CFG.range, py = b.y + Math.sin(a0) * CFG.range;
+      const spark = c.createRadialGradient(px, py, 0, px, py, 26 / scale);
+      spark.addColorStop(0, "#ffffff" + (focus ? "aa" : active ? "77" : "66"));
+      spark.addColorStop(.35, color + (active ? "88" : "66"));
+      spark.addColorStop(1, color + "00");
+      c.fillStyle = spark;
+      c.beginPath(); c.arc(px, py, 26 / scale, 0, Math.PI * 2); c.fill();
+    }
+
     if (active) {
-      /* نورهای چرخان روی حلقه */
-      const sweepAngle = time * (g.haloSpin ?? 1.35) + b.id;
-      for (let k = 0; k < 3; k++) {
-        const a0 = sweepAngle + (k / 3) * Math.PI * 2;
-        const px = b.x + Math.cos(a0) * CFG.range, py = b.y + Math.sin(a0) * CFG.range;
-        const spark = c.createRadialGradient(px, py, 0, px, py, 26 / scale);
-        spark.addColorStop(0, "#ffffff" + (focus ? "aa" : "77"));
-        spark.addColorStop(.35, color + "88");
-        spark.addColorStop(1, color + "00");
-        c.fillStyle = spark;
-        c.beginPath(); c.arc(px, py, 26 / scale, 0, Math.PI * 2); c.fill();
-      }
       c.fillStyle = color + (focus ? "1c" : "0e");
       c.beginPath(); c.arc(b.x, b.y, CFG.range, 0, Math.PI * 2); c.fill();
       /* تیک‌های درخشان با درخششِ همراه */
@@ -78,7 +79,7 @@ export function drawTowerRanges(c: Context, g: Game, time = 0) {
       }
       c.shadowBlur = 0;
     } else {
-      /* برج خنثی: هالهٔ سردِ کم‌رنگ ولی خوانا — این برج هم شلیک می‌کند */
+      /* برج خنثی: هالهٔ نقره‌ایِ روشن همراه با نورهای چرخان */
       c.setLineDash([6 / scale, 7 / scale]);
       c.strokeStyle = color + (pulse > .9 ? "5a" : "3a");
       c.lineWidth = (focus ? 3 : 2) / scale;

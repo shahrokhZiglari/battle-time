@@ -183,8 +183,8 @@ export default function App() {
     if (cur.baseCap !== s.maxTroops) cur.setMaxTroops(s.maxTroops);
     const minRoadLength = s.minCastleDistance * PX_PER_METER;
     // فقط اگر قوانینِ راه واقعاً عوض شده باشد، شبکهٔ راه بازسازی می‌شود
-    if (cur.openRoads !== s.openRoads || cur.minRoadLength !== minRoadLength || cur.randomRoads !== s.customMap.randomRoads) {
-      cur.setRoadRules({ openRoads: s.openRoads, minRoadLength, randomRoads: s.customMap.randomRoads });
+    if (cur.openRoads !== s.openRoads || cur.minRoadLength !== minRoadLength) {
+      cur.setRoadRules({ openRoads: s.openRoads, minRoadLength });
     }
     setHud(snapshot(cur));
   }, []);
@@ -235,7 +235,7 @@ export default function App() {
     // همهٔ تغییرها از مسیرِ امن اعمال می‌شوند تا وضعیتِ نبرد بازنشانی نشود.
     applyGlobalToGame(save);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [save.snd, save.volumes, save.speed, save.battleMode, save.maxTroops, save.ambientSound, save.marchSound, save.openRoads, save.minCastleDistance, save.customMap.randomRoads, save.attackDash]);
+  }, [save.snd, save.volumes, save.speed, save.battleMode, save.maxTroops, save.ambientSound, save.marchSound, save.openRoads, save.minCastleDistance, save.haloSpin, save.attackDash]);
 
   /**
    * تا وقتی یک پنل روی بازی باز است، نبرد حتماً متوقف می‌ماند؛
@@ -296,7 +296,6 @@ export default function App() {
       g.setRoadRules({
         openRoads: saveRef.current.openRoads,
         minRoadLength: saveRef.current.minCastleDistance * PX_PER_METER,
-        randomRoads: saveRef.current.customMap.randomRoads,
       });
       g.onToast = toastIt;
       g.onDemoReset = () => {
@@ -361,7 +360,7 @@ export default function App() {
       toastIt(error);
       return;
     }
-    const level = createRandomLevel(mapSettings);
+    const level = createRandomLevel({ ...mapSettings, minDistance: saveRef.current.minCastleDistance });
     // فقط و فقط تنظیماتِ نقشه عوض می‌شود؛ تنظیماتِ سراسری دست‌نخورده می‌ماند.
     updateSave((prev) => ({ ...prev, customMap: mapSettings }));
 

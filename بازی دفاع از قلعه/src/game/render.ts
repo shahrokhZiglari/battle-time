@@ -1,4 +1,4 @@
-import { BUILDING_LABELS, Building, COL, DK, fa, Squad, TROOP_TYPES, UNITS } from "./config";
+import { BUILDING_LABELS, Building, COL, DK, Effect, fa, Squad, TROOP_TYPES, UNITS } from "./config";
 import { Game, Preview } from "./engine";
 import { unitCount } from "./troops";
 import { drawScenery, drawTerrain, drawWater, landscapeFor } from "./terrain";
@@ -38,17 +38,28 @@ function drawB(c: C, g: Game, b: Building, T: number) {
   drawStructure(c, b, T, isSel || isDraft || g.hover === b);
 
   if (b.hit > 0) {
-    c.strokeStyle = `rgba(255,90,80,${b.hit * 0.9})`;
-    c.lineWidth = 5;
+    const h = Math.max(0, Math.min(1, b.hit));
+    const rx = 40 + (1 - h) * 16;
+    c.strokeStyle = `rgba(255,108,92,${(h * 0.72).toFixed(3)})`;
+    c.lineWidth = 2.6 * h + 0.8;
     c.beginPath();
-    c.arc(X, Y, 46 + (1 - b.hit) * 16, 0, 7);
+    c.ellipse(X, Y + 9, rx, rx * 0.5, 0, 0, Math.PI * 2);
     c.stroke();
   }
   if (b.fl > 0) {
-    c.fillStyle = `rgba(255,255,255,${b.fl * 0.65})`;
+    const fl = Math.max(0, Math.min(1, b.fl));
+    const col = COL[b.o] || "#ffffff";
+    c.save();
+    c.globalCompositeOperation = "lighter";
+    const glow = c.createRadialGradient(X, Y - 20, 4, X, Y - 20, 52);
+    glow.addColorStop(0, withAlpha("#ffffff", fl * 0.28));
+    glow.addColorStop(0.45, withAlpha(tint(col, 42), fl * 0.2));
+    glow.addColorStop(1, withAlpha(col, 0));
+    c.fillStyle = glow;
     c.beginPath();
-    c.arc(X, Y, 50, 0, 7);
+    c.arc(X, Y - 20, 52, 0, Math.PI * 2);
     c.fill();
+    c.restore();
   }
 
   if (isTarget && g.preview?.sources.length) drawTargetMark(c, g.preview, T, dashAlpha(g));
@@ -260,6 +271,106 @@ function arrows(c: C, g: Game, T: number) {
 }
 
 /** #rrggbb → rgba() با آلفای دلخواه */
+function drawCaptureEffect(c: C, f: Effect, p: number) {
+  const clamped = Math.max(0, Math.min(1, p));
+  const ease = 1 - Math.pow(1 - clamped, 3);
+  const fade = Math.pow(1 - clamped, 1.4);
+  const maxR = f.r || 86;
+  const bright = tint(f.c, 56);
+  const gold = "#ffe8a3";
+  const gy = f.y + 9;
+
+  c.save();
+
+  // ۱) هالهٔ نرمِ روی زمین هم‌راستا با پرسپکتیوِ ۲:۱ جزیره
+  c.save();
+  c.translate(f.x, gy);
+  c.scale(1, 0.5);
+  const groundGlow = c.createRadialGradient(0, 0, 8, 0, 0, maxR);
+  groundGlow.addColorStop(0, withAlpha(bright, 0.22 * fade));
+  groundGlow.addColorStop(0.55, withAlpha(f.c, 0.16 * fade));
+  groundGlow.addColorStop(1, withAlpha(f.c, 0));
+  c.fillStyle = groundGlow;
+  c.beginPath();
+  c.arc(0, 0, maxR, 0, Math.PI * 2);
+  c.fill();
+  c.restore();
+
+  // ۲) دو موجِ بیضویِ هم‌مرکز روی زمین (موجِ تیم + موجِ طلاییِ ظریف)
+  const rx1 = 30 + ease * (maxR - 30);
+  c.strokeStyle = withAlpha(f.c, 0.85 * fade);
+  c.lineWidth = 3 * (1 - clamped) + 0.9;
+  c.beginPath();
+  c.ellipse(f.x, gy, rx1, rx1 * 0.5, 0, 0, Math.PI * 2);
+  c.stroke();
+
+  if (clamped > 0.05) {
+    const p2 = Math.min(1, (clamped - 0.05) / 0.9);
+    const ease2 = 1 - Math.pow(1 - p2, 3);
+    const fade2 = Math.pow(1 - p2, 1.5);
+    const rx2 = 22 + ease2 * (maxR * 0.76 - 22);
+    c.strokeStyle = withAlpha(gold, 0.72 * fade2);
+    c.lineWidth = 1.9 * (1 - p2) + 0.6;
+    c.beginPath();
+    c.ellipse(f.x, gy, rx2, rx2 * 0.5, 0, 0, Math.PI * 2);
+    c.stroke();
+  }
+
+  // ۳) ستونِ نورِ لطیفِ تاجِ قلعه (بدونِ پوشاندنِ جزئیاتِ سنگی ساختمان)
+  const beamEnvelope =
+    clamped < 0.18 ? clamped / 0.18 : Math.pow(Math.max(0, 1 - (clamped - 0.18) / 0.82), 1.85);
+  if (beamEnvelope > 0.005) {
+    c.save();
+    c.globalCompositeOperation = "lighter";
+    c.translate(f.x, f.y - 26);
+    c.scale(0.62, 1.15);
+    const auraR = 46 + ease * 10;
+    const beam = c.createRadialGradient(0, 0, 3, 0, 0, auraR);
+    beam.addColorStop(0, withAlpha("#ffffff", 0.3 * beamEnvelope));
+    beam.addColorStop(0.4, withAlpha(bright, 0.24 * beamEnvelope));
+    beam.addColorStop(1, withAlpha(f.c, 0));
+    c.fillStyle = beam;
+    c.beginPath();
+    c.arc(0, 0, auraR, 0, Math.PI * 2);
+    c.fill();
+    c.restore();
+  }
+
+  // ۴) ذراتِ لوزی‌شکلِ درخشان (هم‌فرم با کریستال‌های بازی) که به آرامی تا بالای پرچم اوج می‌گیرند
+  const moteCount = 10;
+  for (let k = 0; k < moteCount; k++) {
+    const delay = (k % 4) * 0.045;
+    if (clamped <= delay) continue;
+    const mp = Math.min(1, (clamped - delay) / (1 - delay));
+    const mEase = 1 - Math.pow(1 - mp, 2.4);
+    const mAlpha = Math.sin(Math.min(1, mp) * Math.PI) * 0.92;
+    if (mAlpha <= 0.02) continue;
+
+    const baseAng = (k / moteCount) * Math.PI * 2 + 0.35;
+    const swirl = baseAng + mEase * 0.55;
+    const orbitR = 22 + (k % 3) * 7 + mEase * 12;
+    const mx = f.x + Math.cos(swirl) * orbitR;
+    const my = f.y - 8 + Math.sin(swirl) * orbitR * 0.46 - mEase * (44 + (k % 3) * 13);
+    const sz = (5.2 - (k % 3) * 0.75) * (1 - mp * 0.65);
+    const col = k % 2 === 0 ? bright : gold;
+
+    c.globalAlpha = mAlpha;
+    polygon(
+      c,
+      [
+        { x: mx, y: my - sz * 1.35 },
+        { x: mx + sz * 0.85, y: my },
+        { x: mx, y: my + sz * 1.35 },
+        { x: mx - sz * 0.85, y: my },
+      ],
+      col,
+    );
+  }
+
+  c.restore();
+}
+
+/** #rrggbb → rgba() با آلفای دلخواه */
 function withAlpha(hex: string, a: number) {
   const h = hex.replace("#", "");
   const n = parseInt(h.length === 3 ? h.split("").map((x) => x + x).join("") : h, 16);
@@ -410,7 +521,11 @@ export function render(c: C, g: Game | null, T: number, W: number, H: number, dp
   drawables.sort((a, b) => a.y - b.y).forEach((item) => item.draw());
 
   for (const f of g.fx) {
-    const p = f.t / f.l;
+    const p = Math.max(0, Math.min(1, f.t / f.l));
+    if (f.k === "capture") {
+      drawCaptureEffect(c, f, p);
+      continue;
+    }
     c.globalAlpha = Math.max(0, 1 - p);
     if (f.k === "txt") {
       c.font = "900 22px " + F_BODY;
@@ -422,21 +537,34 @@ export function render(c: C, g: Game | null, T: number, W: number, H: number, dp
       c.fillStyle = f.c;
       c.fillText(f.s || "", f.x, f.y - p * 36);
     } else if (f.k === "burst") {
-      const R = (f.r || 40) * (0.3 + p);
-      c.strokeStyle = f.c;
-      c.lineWidth = 4 * (1 - p) + 1;
+      const ease = 1 - Math.pow(1 - p, 2.5);
+      const R = (f.r || 40) * (0.25 + ease * 0.85);
       for (let k = 0; k < 8; k++) {
-        const a = (k / 8) * Math.PI * 2 + p * 1.4;
-        c.beginPath();
-        c.moveTo(f.x + Math.cos(a) * R * 0.35, f.y + Math.sin(a) * R * 0.35);
-        c.lineTo(f.x + Math.cos(a) * R, f.y + Math.sin(a) * R);
-        c.stroke();
+        const a = (k / 8) * Math.PI * 2 + ease * 0.6;
+        const r0 = R * 0.32;
+        const r1 = R * (0.9 + (k % 2) * 0.14);
+        const mid = (r0 + r1) * 0.5;
+        const w = 2.6 * (1 - p);
+        const nx = -Math.sin(a) * w;
+        const ny = Math.cos(a) * w;
+        polygon(
+          c,
+          [
+            { x: f.x + Math.cos(a) * r0, y: f.y + Math.sin(a) * r0 },
+            { x: f.x + Math.cos(a) * mid + nx, y: f.y + Math.sin(a) * mid + ny },
+            { x: f.x + Math.cos(a) * r1, y: f.y + Math.sin(a) * r1 },
+            { x: f.x + Math.cos(a) * mid - nx, y: f.y + Math.sin(a) * mid - ny },
+          ],
+          k % 2 === 0 ? f.c : tint(f.c, 45),
+        );
       }
     } else {
+      const ease = 1 - Math.pow(1 - p, 2.6);
+      const rx = 14 + ease * (f.r || 56);
       c.strokeStyle = f.c;
-      c.lineWidth = 6 * (1 - p) + 1;
+      c.lineWidth = 3.2 * (1 - p) + 0.8;
       c.beginPath();
-      c.arc(f.x, f.y, 12 + p * (f.r || 62), 0, 7);
+      c.ellipse(f.x, f.y, rx, rx * 0.52, 0, 0, Math.PI * 2);
       c.stroke();
     }
     c.globalAlpha = 1;
