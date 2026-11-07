@@ -25,15 +25,15 @@ var CFG = {
 };
 var TROOP_TYPES = ["normal", "fast", "heavy"];
 var UNITS = {
-  normal: { label: "عادی", power: 1, speed: 1 },
-  fast: { label: "سریع", power: 1, speed: 1.5 },
-  heavy: { label: "سنگین", power: 2, speed: 2 / 3 }
+  normal: { label: "عادی", power: 1, speed: 0.9 },
+  fast: { label: "سریع", power: 1, speed: 1.3 },
+  heavy: { label: "سنگین", power: 1.5, speed: 0.7 }
 };
 var UNIT_LIMITS = { power: [0.5, 4], speed: [0.4, 2.5] };
 var DEFAULT_UNIT_TUNING = {
-  normal: { power: 1, speed: 1 },
-  fast: { power: 1, speed: 1.5 },
-  heavy: { power: 2, speed: 2 / 3 }
+  normal: { power: 1, speed: 0.9 },
+  fast: { power: 1, speed: 1.3 },
+  heavy: { power: 1.5, speed: 0.7 }
 };
 var clampNumber = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 function normalizeUnitTuning(raw) {
@@ -58,13 +58,13 @@ function applyUnitTuning(raw) {
   }
   return tuning;
 }
-var DEFAULT_HALO_SPIN = 1.35;
+var DEFAULT_HALO_SPIN = 0.1;
 var HALO_SPIN_LIMITS = [0, 3];
 var normalizeHaloSpin = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? Math.round(clampNumber(n, ...HALO_SPIN_LIMITS) * 100) / 100 : DEFAULT_HALO_SPIN;
 };
-var DEFAULT_ATTACK_DASH = 1;
+var DEFAULT_ATTACK_DASH = 0.3;
 var ATTACK_DASH_LIMITS = [0, 1];
 var normalizeAttackDash = (v) => {
   const n = Number(v);
@@ -119,7 +119,7 @@ var INTRO_LEVELS = [
   {
     name: "تاکتیک",
     ai: 0.85,
-    hint: "سرباز سریع دو برابر تندتر است؛ سرباز سنگین دو برابر قدرت دارد اما با سرعت دوسوم حرکت می‌کند.",
+    hint: "سرباز سریع چابک‌تر است (سرعت ۱٫۳)؛ سرباز سنگین قدرت ۱٫۵ برابر دارد اما آرام‌تر حرکت می‌کند (سرعت ۰٫۷).",
     b: [
       [100, 300, 1, "barracks", 30],
       [300, 120, 0, "speed", 8],
@@ -1974,7 +1974,7 @@ function drawTowerRanges(c, g, time = 0) {
     c.stroke();
     c.setLineDash([]);
     if (active) {
-      const sweepAngle = time * (g.haloSpin ?? 1.35) + b.id;
+      const sweepAngle = time * (g.haloSpin ?? DEFAULT_HALO_SPIN) + b.id;
       for (let k = 0; k < 3; k++) {
         const a0 = sweepAngle + k / 3 * Math.PI * 2;
         const px = b.x + Math.cos(a0) * CFG.range, py = b.y + Math.sin(a0) * CFG.range;
@@ -2083,9 +2083,9 @@ var Game = class {
     __publicField(this, "worldHeight", CFG.H);
     __publicField(this, "largeMap", false);
     /** سرعتِ چرخشِ نورهای دور برج (صفر = بی‌حرکت) */
-    __publicField(this, "haloSpin", 1.35);
+    __publicField(this, "haloSpin", DEFAULT_HALO_SPIN);
     /** شفافیتِ نقطه‌چینِ مسیر حمله (۰..۱) */
-    __publicField(this, "attackDash", 1);
+    __publicField(this, "attackDash", DEFAULT_ATTACK_DASH);
     /** مقیاسِ اندازهٔ کوه‌های دریایی (از تنظیماتِ سراسری) — فقط ظاهر */
     /** ارتفاعِ نوارِ بالای صفحه (پیکسل) که نقشه نباید زیرش برود */
     __publicField(this, "hudInset", 0);
@@ -3993,7 +3993,9 @@ var defaultSettings = {
   openRoads: true,
   minCastleDistance: 30,
   ambientSound: true,
-  marchSound: true
+  marchSound: true,
+  haloSpin: DEFAULT_HALO_SPIN,
+  attackDash: DEFAULT_ATTACK_DASH
 };
 function extractUnitTuning(raw) {
   const t = raw && typeof raw === "object" ? raw : {};

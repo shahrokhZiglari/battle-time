@@ -1,4 +1,4 @@
-import { CFG, COL, type Building, type Point } from "./config";
+import { CFG, COL, DEFAULT_HALO_SPIN, type Building, type Point } from "./config";
 import type { Game } from "./engine";
 import type { Context } from "./scene-geometry";
 
@@ -51,7 +51,7 @@ export function drawTowerRanges(c: Context, g: Game, time = 0) {
 
     if (active) {
       /* نورهای چرخان روی حلقه */
-      const sweepAngle = time * (g.haloSpin ?? 1.35) + b.id;
+      const sweepAngle = time * (g.haloSpin ?? DEFAULT_HALO_SPIN) + b.id;
       for (let k = 0; k < 3; k++) {
         const a0 = sweepAngle + (k / 3) * Math.PI * 2;
         const px = b.x + Math.cos(a0) * CFG.range, py = b.y + Math.sin(a0) * CFG.range;

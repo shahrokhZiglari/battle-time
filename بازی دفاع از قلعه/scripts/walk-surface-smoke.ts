@@ -123,6 +123,6 @@ console.log(`PASS: ten dense, seeded random maps checked against rendered terrai
   }
   assert.ok(s.x > g.bs[1].x, "Movement continues beyond the intermediate castle");
 }
-assert.equal(UNITS.fast.speed, 1.5);
+assert.equal(UNITS.fast.speed, 1.3);
 assert.equal(CFG.range, 150);
 console.log("PASS: simulation and visible soldiers use one sampler, including all detour points; existing speeds and range are unchanged.");

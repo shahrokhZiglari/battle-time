@@ -235,7 +235,7 @@ export default function App() {
     // همهٔ تغییرها از مسیرِ امن اعمال می‌شوند تا وضعیتِ نبرد بازنشانی نشود.
     applyGlobalToGame(save);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [save.snd, save.volumes, save.speed, save.battleMode, save.maxTroops, save.ambientSound, save.marchSound, save.openRoads, save.minCastleDistance, save.customMap.randomRoads, save.attackDash]);
+  }, [save.snd, save.volumes, save.speed, save.battleMode, save.maxTroops, save.ambientSound, save.marchSound, save.openRoads, save.minCastleDistance, save.customMap.randomRoads, save.haloSpin, save.attackDash]);
 
   /**
    * تا وقتی یک پنل روی بازی باز است، نبرد حتماً متوقف می‌ماند؛

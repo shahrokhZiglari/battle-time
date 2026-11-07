@@ -1,4 +1,4 @@
-import { applyUnitTuning, COL, LEVELS, normalizeAttackDash, normalizeHaloSpin, normalizeUnitTuning, type UnitTuningMap } from "../src/game/config";
+import { applyUnitTuning, COL, DEFAULT_ATTACK_DASH, DEFAULT_HALO_SPIN, LEVELS, normalizeAttackDash, normalizeHaloSpin, normalizeUnitTuning, type UnitTuningMap } from "../src/game/config";
 import { Game } from "../src/game/engine";
 import { render } from "../src/game/render";
 import { setNatureLayers, setSfxVolumes, setSound, sfx, SFX_KEYS, type SfxKey } from "../src/game/sound";
@@ -86,6 +86,8 @@ const defaultSettings: Settings = {
   minCastleDistance: 30,
   ambientSound: true,
   marchSound: true,
+  haloSpin: DEFAULT_HALO_SPIN,
+  attackDash: DEFAULT_ATTACK_DASH,
 };
 
 function extractUnitTuning(raw: unknown): UnitTuningMap {

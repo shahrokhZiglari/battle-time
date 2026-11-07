@@ -1,4 +1,4 @@
-import { Building, CFG, COL, defOf, Effect, fa, Level, LEVELS, Owner, Squad, TROOP_TYPES, UNITS } from "./config";
+import { Building, CFG, COL, DEFAULT_ATTACK_DASH, DEFAULT_HALO_SPIN, defOf, Effect, fa, Level, LEVELS, Owner, Squad, TROOP_TYPES, UNITS } from "./config";
 import { sfx } from "./sound";
 import { playCaptureSound, setNatureSound } from "./nature-audio";
 import { addUnit, armyCount, armyPower, createArmy, damageArmy, emptyArmy, producedUnit, selectArmy, takeArmy, unitCount } from "./troops";
@@ -95,9 +95,9 @@ export class Game {
   worldHeight = CFG.H;
   largeMap = false;
   /** سرعتِ چرخشِ نورهای دور برج (صفر = بی‌حرکت) */
-  haloSpin = 1.35;
+  haloSpin = DEFAULT_HALO_SPIN;
   /** شفافیتِ نقطه‌چینِ مسیر حمله (۰..۱) */
-  attackDash = 1;
+  attackDash = DEFAULT_ATTACK_DASH;
   /** مقیاسِ اندازهٔ کوه‌های دریایی (از تنظیماتِ سراسری) — فقط ظاهر */
   /** ارتفاعِ نوارِ بالای صفحه (پیکسل) که نقشه نباید زیرش برود */
   hudInset = 0;

@@ -17,6 +17,25 @@ const saveMod = await import("../src/game/save");
 const blazorMod = await import("./blazor-battle");
 const { SettingsPanel } = await import("../src/components/Panels");
 
+/* ۰) پیش‌فرض‌های تازه در وب و Blazor دقیقاً یکسان‌اند */
+{
+  mem.clear();
+  const freshWeb = saveMod.loadSave();
+  assert.deepEqual(freshWeb.unitTuning.normal, { power: 1, speed: 0.9 });
+  assert.deepEqual(freshWeb.unitTuning.fast, { power: 1, speed: 1.3 });
+  assert.deepEqual(freshWeb.unitTuning.heavy, { power: 1.5, speed: 0.7 });
+  assert.equal(freshWeb.haloSpin, 0.1);
+  assert.equal(freshWeb.attackDash, 0.3);
+
+  const blazorDefaults = JSON.parse(blazorMod.exportPortableSettings(null));
+  assert.deepEqual(blazorDefaults.units.normal, { power: 1, speed: 0.9 });
+  assert.deepEqual(blazorDefaults.units.fast, { power: 1, speed: 1.3 });
+  assert.deepEqual(blazorDefaults.units.heavy, { power: 1.5, speed: 0.7 });
+  assert.equal(blazorDefaults.visuals.haloSpin, 0.1);
+  assert.equal(blazorDefaults.visuals.attackDash, 0.3);
+}
+console.log("PASS: Default unit speeds/powers, halo spin (0.1) and attack dash (30%) match across Web & Blazor.");
+
 /* ۱) رفت‌وبرگشتِ کامل در نسخهٔ وب + حفظِ پیشرفتِ مراحل */
 {
   mem.clear();

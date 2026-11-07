@@ -52,9 +52,9 @@ public sealed class CastleSettings
     /// <summary>قدرت و سرعتِ هر نوع سرباز</summary>
     public UnitTuningSettings TroopTuning { get; set; } = new();
     /// <summary>سرعتِ چرخشِ نورهای دور برج (۰ تا ۳)</summary>
-    public double HaloSpin { get; set; } = 1.35;
+    public double HaloSpin { get; set; } = 0.1;
     /// <summary>شفافیتِ نقطه‌چینِ مسیر حمله (۰ تا ۱)</summary>
-    public double AttackDash { get; set; } = 1;
+    public double AttackDash { get; set; } = 0.3;
     /// <summary>بلندیِ تک‌تکِ صداها و افکت‌ها (۰ تا ۱) — هر کلید یک اسلایدر در تنظیمات</summary>
     public Dictionary<string, double> Volumes { get; set; } = DefaultVolumes();
 
@@ -100,11 +100,11 @@ public sealed class CastleSettings
 public sealed class UnitTuningSettings
 {
     public double NormalPower { get; set; } = 1;
-    public double NormalSpeed { get; set; } = 1;
+    public double NormalSpeed { get; set; } = 0.9;
     public double FastPower { get; set; } = 1;
-    public double FastSpeed { get; set; } = 1.5;
-    public double HeavyPower { get; set; } = 2;
-    public double HeavySpeed { get; set; } = 0.67;
+    public double FastSpeed { get; set; } = 1.3;
+    public double HeavyPower { get; set; } = 1.5;
+    public double HeavySpeed { get; set; } = 0.7;
 
     public UnitTuningSettings Copy() => new()
     {
