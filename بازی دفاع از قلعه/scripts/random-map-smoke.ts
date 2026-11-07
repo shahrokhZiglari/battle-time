@@ -10,7 +10,7 @@ assert.equal(LEVELS.length, 30, "Campaign mode contains the requested 30 levels.
 assert.ok(LEVELS[29].name.length > 0);
 console.log("PASS: 30 campaign levels are available in addition to random-map mode.");
 
-const request = { players: 3, normal: 5, fast: 2, heavy: 2, towers: 2, lakes: 2, ships: 2, boats: 3, largeMap: true, minDistance: 10 };
+const request = { players: 3, normal: 5, fast: 2, heavy: 2, towers: 2, lakes: 2, ships: 2, boats: 3, largeMap: true, minDistance: 0 };
 assert.equal(validateRandomMap(request), null);
 const level = createRandomLevel(request);
 assert.equal(level.name, "نقشهٔ رندوم");
@@ -68,7 +68,7 @@ const invalid = [
   [{ ...request, heavy: -1 }, "non-negative counts"],
 ] as const;
 for (const [value, reason] of invalid) assert.ok(validateRandomMap(value), `Reject invalid config: ${reason}`);
-assert.deepEqual(DEFAULT_RANDOM_MAP, { players: 3, normal: 5, fast: 2, heavy: 2, towers: 2, lakes: 2, ships: 2, boats: 3, largeMap: true, minDistance: 10 });
+assert.deepEqual(DEFAULT_RANDOM_MAP, { players: 3, normal: 5, fast: 2, heavy: 2, towers: 2, lakes: 2, ships: 2, boats: 3, largeMap: true, minDistance: 0 });
 console.log("PASS: invalid player/building counts are rejected and settings default to the requested example.");
 
 {

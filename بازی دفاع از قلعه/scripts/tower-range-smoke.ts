@@ -60,12 +60,12 @@ for (const owner of [0, 1, 2, 3, 4] as Owner[]) {
   assert.ok(g.sq[0].hp < before, `neutral tower must damage passing squads (${before} → ${g.sq[0].hp})`);
 }
 
-/* سرعتِ چرخشِ نورها از تنظیمات خوانده می‌شود */
-{
+/* سرعتِ چرخشِ نورها هم برای برجِ متصرف‌شده و هم برای برجِ خالی (خنثی) از تنظیمات خوانده می‌شود */
+for (const owner of [0, 1] as Owner[]) {
   const g = new Game(0);
   const tower = g.bs[1];
   tower.type = "tower";
-  tower.o = 1;
+  tower.o = owner;
   g.view.s = .5;
   const draw = (spin: number, time: number) => {
     g.haloSpin = spin;
@@ -79,10 +79,10 @@ for (const owner of [0, 1, 2, 3, 4] as Owner[]) {
     }) as unknown as CanvasRenderingContext2D;
     drawTowerRanges(ctx, g, time);
     // نخستین جرقهٔ چرخان: مرکزِ آرکِ کوچکِ درخشش
-    return arcs.find((a) => a[2] < CFG.range - 1) ?? arcs[0];
+    return arcs.find((a) => a[2] < CFG.range * 0.9) ?? arcs[0];
   };
   const still = draw(0, 3.7);
   const fast = draw(2.4, 3.7);
-  assert.notDeepEqual(still, fast, "halo spin setting changes the rotating lights' positions");
+  assert.notDeepEqual(still, fast, `halo spin setting moves rotating lights for owner=${owner}`);
 }
-console.log("PASS: every tower shows its real 150-unit range without hover; neutral towers now defend themselves.");
+console.log("PASS: every tower (both owned and empty/neutral) shows rotating lights and its real 150-unit range.");

@@ -86,7 +86,7 @@
 .castle-root ::deep .cg-zoom-controls .cg-btn { min-width: 26px; padding: 3px 6px; font-size: 12px; }
 .castle-root ::deep .cg-zoom-controls .cg-zoom-step { width: 24px; height: 24px; padding: 0; font-size: 15px; line-height: 1; }
 .castle-root ::deep .cg-zoom-controls .cg-zoom-value { min-width: 46px; font-size: 10px; padding: 3px 4px; }
-.castle-root ::deep .cg-balance { min-width: 250px; }
+.castle-root ::deep .cg-balance { min-width: min(500px, 48vw); flex: 0 1 500px; }
 .castle-root ::deep .cg-faction-list { display: grid; grid-template-columns: repeat(var(--faction-count), minmax(0, 1fr)); gap: 2px 10px; }
 .castle-root ::deep .cg-faction { display: flex; align-items: center; gap: 4px; min-width: 0; white-space: nowrap; font-size: 10px; }
 .castle-root ::deep .cg-faction strong, .castle-root ::deep .cg-faction .cg-muted { overflow: hidden; text-overflow: ellipsis; }

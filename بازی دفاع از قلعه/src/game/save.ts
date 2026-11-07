@@ -97,7 +97,7 @@ export const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   battleMode: "field",
   maxTroops: 50,
   openRoads: true,
-  minCastleDistance: 10,
+  minCastleDistance: 0,
   ambientSound: true,
   marchSound: true,
   unitTuning: DEFAULT_UNIT_TUNING,
@@ -215,7 +215,7 @@ export function normalizeGlobalSettings(raw: Partial<GlobalSettings> | null | un
       : 50;
   base.openRoads = base.openRoads === true;
   const dist = Number(base.minCastleDistance);
-  base.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 10;
+  base.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 0;
   base.ambientSound = base.ambientSound !== false;
   base.marchSound = base.marchSound !== false;
   base.snd = base.snd !== false;

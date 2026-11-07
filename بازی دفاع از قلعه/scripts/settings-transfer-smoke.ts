@@ -26,8 +26,8 @@ const { SettingsPanel, RandomMapPanel } = await import("../src/components/Panels
   assert.deepEqual(freshWeb.unitTuning.heavy, { power: 1.5, speed: 0.7 });
   assert.equal(freshWeb.haloSpin, 0.1);
   assert.equal(freshWeb.attackDash, 0.3);
-  assert.equal(freshWeb.minCastleDistance, 10);
-  assert.equal(freshWeb.customMap.minDistance, 10);
+  assert.equal(freshWeb.minCastleDistance, 0);
+  assert.equal(freshWeb.customMap.minDistance, 0);
   assert.equal(freshWeb.volumes.capture, 0.1);
   assert.equal(freshWeb.volumes.select, 1);
   assert.equal("randomRoads" in freshWeb.customMap, false);
@@ -38,12 +38,12 @@ const { SettingsPanel, RandomMapPanel } = await import("../src/components/Panels
   assert.deepEqual(blazorDefaults.units.heavy, { power: 1.5, speed: 0.7 });
   assert.equal(blazorDefaults.visuals.haloSpin, 0.1);
   assert.equal(blazorDefaults.visuals.attackDash, 0.3);
-  assert.equal(blazorDefaults.gameplay.minCastleDistance, 10);
-  assert.equal(blazorDefaults.randomMap.minDistance, 10);
+  assert.equal(blazorDefaults.gameplay.minCastleDistance, 0);
+  assert.equal(blazorDefaults.randomMap.minDistance, 0);
   assert.equal(blazorDefaults.sound.volumes.capture, 0.1);
   assert.equal("randomRoads" in blazorDefaults.randomMap, false);
 }
-console.log("PASS: Default unit speeds/powers, capture=10%, distance=10m, haloSpin=0.1 and attackDash=30% match across Web & Blazor.");
+console.log("PASS: Default unit speeds/powers, capture=10%, distance=0m, haloSpin=0.1 and attackDash=30% match across Web & Blazor.");
 
 /* ۱) رفت‌وبرگشتِ کامل در نسخهٔ وب + حفظِ پیشرفتِ مراحل */
 {
@@ -225,7 +225,7 @@ console.log("PASS: Invalid or empty JSON payloads are safely rejected with clear
   );
   assert.ok(html.includes("خروجی / ورودی"), "SettingsPanel renders the transfer button");
   assert.ok(html.includes("۱۰٪"), "SettingsPanel displays 10% capture default");
-  assert.ok(html.includes("۱۰ م"), "SettingsPanel displays 10m castle distance default");
+  assert.ok(html.includes("۰ م"), "SettingsPanel displays 0m castle distance default");
 
   const mapHtml = renderToStaticMarkup(
     React.createElement(RandomMapPanel, {
@@ -236,6 +236,6 @@ console.log("PASS: Invalid or empty JSON payloads are safely rejected with clear
     }),
   );
   assert.equal(mapHtml.includes("راه‌های رندوم"), false, "randomRoads toggle is removed from RandomMapPanel");
-  assert.ok(mapHtml.includes("۱۰ متر"), "RandomMapPanel displays 10m castle distance default");
+  assert.ok(mapHtml.includes("۰ متر"), "RandomMapPanel displays 0m castle distance default");
 }
 console.log("PASS: SettingsPanel & RandomMapPanel render updated defaults and omit randomRoads.");

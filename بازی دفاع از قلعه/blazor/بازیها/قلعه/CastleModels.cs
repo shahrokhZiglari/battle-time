@@ -20,7 +20,7 @@ public sealed class RandomMapSettings
     public int Boats { get; set; } = 3;
     public bool LargeMap { get; set; } = true;
     /// <summary>حداقل فاصلهٔ دو قلعهٔ همسایه، به متر</summary>
-    public int MinDistance { get; set; } = 10;
+    public int MinDistance { get; set; } = 0;
 
     public RandomMapSettings Copy() => new()
     {
@@ -42,7 +42,7 @@ public sealed class CastleSettings
     /// <summary>Every castle can reach every other castle.</summary>
     public bool OpenRoads { get; set; } = true;
     /// <summary>حداقل فاصلهٔ دو قلعهٔ همسایه، به متر</summary>
-    public int MinCastleDistance { get; set; } = 10;
+    public int MinCastleDistance { get; set; } = 0;
     /// <summary>Calm nature ambience.</summary>
     public bool AmbientSound { get; set; } = true;
     /// <summary>Marching sound while troops travel.</summary>

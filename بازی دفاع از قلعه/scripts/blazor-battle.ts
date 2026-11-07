@@ -81,7 +81,7 @@ const defaultSettings: Settings = {
   maxTroopsCap: 50,
   customMap: DEFAULT_RANDOM_MAP,
   openRoads: true,
-  minCastleDistance: 10,
+  minCastleDistance: 0,
   ambientSound: true,
   marchSound: true,
   haloSpin: DEFAULT_HALO_SPIN,
@@ -115,7 +115,7 @@ function normalize(input: Partial<Settings> | null): Settings {
   settings.customMap = normalizeRandomMap(settings.customMap);
   settings.openRoads = settings.openRoads === true;
   const dist = Number(settings.minCastleDistance);
-  settings.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 10;
+  settings.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 0;
   settings.ambientSound = settings.ambientSound !== false;
   settings.marchSound = settings.marchSound !== false;
   const tuned = extractUnitTuning(settings.troopTuning);

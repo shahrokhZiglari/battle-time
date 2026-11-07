@@ -27,7 +27,7 @@ export const DEFAULT_RANDOM_MAP: RandomMapSettings = {
   ships: 2,
   boats: 3,
   largeMap: true,
-  minDistance: 10,
+  minDistance: 0,
 };
 
 /** هر متر در فضای جهان بازی برابر چند پیکسل است (۱ متر ≈ ۶ پیکسل). */

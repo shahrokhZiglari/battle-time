@@ -48,9 +48,30 @@ export interface Vessel {
   /** فازِ شروع تا هر شناور در نقطهٔ دیگری از مسیر باشد */
   phase: number;
 }
+/** کشتیِ در حالِ عبور از دریا (از یک افقِ دریا وارد و از افقِ مقابل خارج می‌شود) */
+export interface VoyagerShip {
+  waypoints: Point[];
+  cumLen: number[];
+  totalLen: number;
+  speed: number;
+  offset: number;
+  scale: number;
+  seed: number;
+  hull: string;
+  sail: string;
+}
 /** بخشِ خشکیِ یک راه بین دو قلعه؛ روی جزیره رسم می‌شود */
 export interface RoadSpan { island: number; a: Point; b: Point; }
-interface Landscape { islands: Island[]; scenery: Scenery[]; hills: Hill[]; vessels: Vessel[]; roads: RoadSpan[]; bridges: BridgeSpan[]; theme: Theme; }
+interface Landscape {
+  islands: Island[];
+  scenery: Scenery[];
+  hills: Hill[];
+  vessels: Vessel[];
+  voyagers: VoyagerShip[];
+  roads: RoadSpan[];
+  bridges: BridgeSpan[];
+  theme: Theme;
+}
 const cache = new WeakMap<Game, { buildings: Game["bs"]; links: Game["links"]; landscape: Landscape }>();
 
 function clip(points: Point[], nx: number, ny: number, limit: number) {
@@ -161,6 +182,194 @@ function placeVessels(g: Game, ships: number, boats: number, shores: Point[][]):
   return out;
 }
 
+/** بررسی می‌کند یک نقطه روی آبِ آزاد با حاشیهٔ امن از همهٔ جزیره‌ها، صخره‌ها و پل‌ها فاصله دارد */
+function isOpenSea(p: Point, islands: Island[], shores: Point[][], g: Game, clear: number): boolean {
+  for (let idx = 0; idx < shores.length; idx++) {
+    const pts = shores[idx];
+    if (inside(p, pts) || distanceToPolygon(p, pts) < clear) return false;
+    // اگر کشتی پایینِ جزیره است، از دیوارهٔ صخره‌ایِ زیر جزیره هم فاصله بگیرد
+    const isl = islands[idx];
+    if (isl && p.y > isl.y && Math.abs(p.x - isl.x) < 190) {
+      const shifted = pts.map((q) => ({ x: q.x + 3, y: q.y + isl.depth + 8 }));
+      if (inside(p, shifted) || distanceToPolygon(p, shifted) < clear * 0.85) return false;
+    }
+  }
+  for (const [ia, ib] of g.links) {
+    if (distanceToLine(p, g.bs[ia], g.bs[ib]) < 42 + clear) return false;
+  }
+  return true;
+}
+
+/** بررسی ایمنیِ کاملِ یک مسیرِ چندتکه‌ای در دریا با نمونه‌برداریِ ریز */
+function isSeaRouteSafe(pts: Point[], islands: Island[], shores: Point[][], g: Game, clear: number): boolean {
+  if (pts.length < 2) return false;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    const seg = Math.hypot(b.x - a.x, b.y - a.y);
+    const steps = Math.max(1, Math.ceil(seg / 10));
+    for (let s = 0; s <= steps; s++) {
+      const t = s / steps;
+      if (!isOpenSea({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, islands, shores, g, clear)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+/** ساختِ مسیرهای عبوریِ کشتی‌ها در دریا (گذر از تنگه‌های بازِ میانی + آبراه‌های شمالی و جنوبی) */
+function buildVoyagers(g: Game, count: number, islands: Island[], shores: Point[][]): VoyagerShip[] {
+  if (count <= 0) return [];
+  const W = g.worldWidth;
+  const H = g.worldHeight;
+  const startX = -150;
+  const endX = W + 150;
+  const steps = 26;
+  const sails = ["#f3ead6", "#e8b44c", "#dfe9ef", "#f7d99c"];
+  const hulls = ["#6b4a2b", "#5c3f26", "#7a5533", "#654328"];
+  const routes: Point[][] = [];
+
+  // ۱) جست‌وجوی تنگه‌های بازِ میانی که از میانِ جزیره‌ها عبور می‌کنند
+  const yCandidates = [0.5, 0.22, 0.78, 0.35, 0.65, 0.12, 0.88].map((r) => r * H);
+  const arches = [0, 58, -58, 95, -95];
+  for (const yMid of yCandidates) {
+    if (routes.length >= 2) break;
+    for (const arch of arches) {
+      const candidate: Point[] = [];
+      for (let k = 0; k <= steps; k++) {
+        const u = k / steps;
+        const x = startX + u * (endX - startX);
+        const y = yMid + arch * Math.sin(Math.PI * u);
+        candidate.push({ x, y });
+      }
+      if (
+        isSeaRouteSafe(candidate, islands, shores, g, 46) &&
+        routes.every((prev) => Math.abs(prev[Math.floor(steps / 2)].y - candidate[Math.floor(steps / 2)].y) > 95)
+      ) {
+        routes.push(candidate);
+        break;
+      }
+    }
+  }
+
+  // ۲) آبراهِ ساحلیِ جنوب (همیشه امن و در دیدِ بازیکن)
+  const buildCoastalLane = (south: boolean, extraMargin: number): Point[] => {
+    const rawY: number[] = [];
+    const baseEdgeY = south ? H - 54 + extraMargin * 0.5 : 58 - extraMargin * 0.5;
+    for (let k = 0; k <= steps; k++) {
+      const u = k / steps;
+      const x = startX + u * (endX - startX);
+      let bound = baseEdgeY;
+      for (const isl of islands) {
+        const pts = shores.find((_, idx) => islands[idx] === isl) ?? isl.points;
+        for (const p of pts) {
+          const dx = Math.abs(p.x - x);
+          if (dx > 135) continue;
+          const weight = Math.cos((dx / 135) * (Math.PI / 2));
+          if (south) {
+            bound = Math.max(bound, p.y + isl.depth + (48 + extraMargin) * (0.55 + 0.45 * weight));
+          } else {
+            bound = Math.min(bound, p.y - (52 + extraMargin) * (0.55 + 0.45 * weight));
+          }
+        }
+      }
+      for (const [ia, ib] of g.links) {
+        const A = g.bs[ia], B = g.bs[ib];
+        const minX = Math.min(A.x, B.x) - 90, maxX = Math.max(A.x, B.x) + 90;
+        if (x < minX || x > maxX) continue;
+        const t = Math.max(0, Math.min(1, (x - A.x) / ((B.x - A.x) || 1)));
+        const by = A.y + (B.y - A.y) * t;
+        if (south) bound = Math.max(bound, by + 84 + extraMargin);
+        else bound = Math.min(bound, by - 84 - extraMargin);
+      }
+      rawY.push(bound);
+    }
+    // نرم‌سازیِ منحنیِ مسیر تا حرکتِ کشتی کاملاً روان و طبیعی باشد
+    let smoothed = rawY.map((_, i) => {
+      let sum = 0, wSum = 0;
+      for (let d = -3; d <= 3; d++) {
+        const j = Math.max(0, Math.min(steps, i + d));
+        const w = 4 - Math.abs(d);
+        sum += rawY[j] * w;
+        wSum += w;
+      }
+      return sum / wSum;
+    });
+    let pts = smoothed.map((y, k) => ({ x: startX + (k / steps) * (endX - startX), y }));
+    // تضمینِ صددرصدیِ فاصلهٔ امن از همهٔ جزیره‌ها و پل‌ها
+    for (let push = 0; push < 12 && !isSeaRouteSafe(pts, islands, shores, g, 42); push++) {
+      smoothed = smoothed.map((y) => y + (south ? 18 : -18));
+      pts = smoothed.map((y, k) => ({ x: startX + (k / steps) * (endX - startX), y }));
+    }
+    return pts;
+  };
+
+  routes.push(buildCoastalLane(true, 0));
+  routes.push(buildCoastalLane(false, 0));
+  routes.push(buildCoastalLane(true, 56));
+
+  const out: VoyagerShip[] = [];
+  const speeds = [25, 29, 22, 27];
+  const startFracs = [0.24, 0.63, 0.44, 0.81];
+
+  for (let i = 0; i < count; i++) {
+    const baseRoute = routes[i % routes.length];
+    // یک‌درمیان از چپ به راست و از راست به چپ حرکت می‌کنند
+    const ordered = i % 2 === 0 ? baseRoute : [...baseRoute].reverse();
+    if (!isSeaRouteSafe(ordered, islands, shores, g, 38)) continue;
+    const cumLen = [0];
+    for (let k = 1; k < ordered.length; k++) {
+      cumLen.push(cumLen[k - 1] + Math.hypot(ordered[k].x - ordered[k - 1].x, ordered[k].y - ordered[k - 1].y));
+    }
+    const totalLen = cumLen[cumLen.length - 1];
+    if (totalLen < 80) continue;
+    out.push({
+      waypoints: ordered,
+      cumLen,
+      totalLen,
+      speed: speeds[i % speeds.length],
+      offset: totalLen * startFracs[i % startFracs.length],
+      scale: 0.96 + (i % 3) * 0.1,
+      seed: 101 + i * 29,
+      hull: hulls[i % hulls.length],
+      sail: sails[i % sails.length],
+    });
+  }
+  return out;
+}
+
+/** موقعیتِ لحظه‌ایِ کشتیِ عبوری در دریا */
+export function voyagerPose(v: VoyagerShip, time: number) {
+  const pauseGap = 90;
+  const cycle = v.totalLen + pauseGap;
+  const d = (((time * v.speed + v.offset) % cycle) + cycle) % cycle;
+  if (d > v.totalLen) {
+    const last = v.waypoints[v.waypoints.length - 1];
+    const prev = v.waypoints[v.waypoints.length - 2] ?? last;
+    return { x: last.x, y: last.y, tilt: 0, dir: (last.x >= prev.x ? 1 : -1) as 1 | -1, visible: false };
+  }
+  let idx = 0;
+  while (idx < v.cumLen.length - 2 && v.cumLen[idx + 1] < d) idx++;
+  const segStart = v.cumLen[idx];
+  const segLen = Math.max(1e-6, v.cumLen[idx + 1] - segStart);
+  const t = (d - segStart) / segLen;
+  const a = v.waypoints[idx];
+  const b = v.waypoints[idx + 1];
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const dir: 1 | -1 = dx >= 0 ? 1 : -1;
+  const bob = Math.sin(time * 1.45 + v.seed) * 1.7;
+  const slopeTilt = Math.max(-0.12, Math.min(0.12, (dy / (Math.abs(dx) || 1)) * 0.22));
+  const waveTilt = Math.sin(time * 1.05 + v.seed * 1.3) * 0.028 + slopeTilt * dir;
+  return {
+    x: a.x + dx * t,
+    y: a.y + dy * t + bob,
+    tilt: waveTilt,
+    dir,
+    visible: true,
+  };
+}
+
 export function landscapeFor(g: Game): Landscape {
   const known = cache.get(g);
   if (known?.buildings === g.bs && known.links === g.links) return known.landscape;
@@ -260,8 +469,14 @@ export function landscapeFor(g: Game): Landscape {
     return { id: b.id, x: b.x, y: b.y, points, depth, theme: surface };
   }).sort((a, b) => a.y - b.y);
   const shores = islands.map((island) => island.points);
-  // شناورها: کشتیِ بادبانی و قایقِ پارویی روی آبِ آزاد
-  vessels.push(...placeVessels(g, Math.max(0, Math.min(MAX_SHIPS, g.L.ships ?? 0)), Math.max(0, Math.min(MAX_BOATS, g.L.boats ?? 0)), shores));
+  // شناورها: در مراحل داستانی هم به طور پیش‌فرض قایق و کشتی‌های عبوری در دریا حضور دارند
+  const shipSetting = g.L.ships;
+  const boatSetting = g.L.boats;
+  const localShips = Math.max(0, Math.min(MAX_SHIPS, shipSetting ?? 1));
+  const localBoats = Math.max(0, Math.min(MAX_BOATS, boatSetting ?? 2));
+  vessels.push(...placeVessels(g, localShips, localBoats, shores));
+  const voyagerCount = shipSetting === 0 ? 0 : Math.min(4, Math.max(3, shipSetting ?? 3));
+  const voyagers = buildVoyagers(g, voyagerCount, islands, shores);
   const bridges = g.links.flatMap(([a, b]) => bridgeWaterSpans(g.bs[a], g.bs[b], shores));
   // بخش‌های خشکیِ راه‌ها: هر پیوند بین دو قلعه، روی جزیره‌ها راهِ خاکی دارد.
   const roads: RoadSpan[] = [];
@@ -286,7 +501,7 @@ export function landscapeFor(g: Game): Landscape {
       cursor = Math.max(cursor, t1);
     }
   }
-  const landscape = { islands, scenery, hills, vessels, roads, bridges, theme };
+  const landscape = { islands, scenery, hills, vessels, voyagers, roads, bridges, theme };
   cache.set(g, { buildings: g.bs, links: g.links, landscape });
   return landscape;
 }
@@ -579,10 +794,55 @@ function paintVessel(c: Context, v: Vessel, pose: { x: number; y: number; tilt: 
   c.restore();
 }
 
+function drawVoyager(c: Context, v: VoyagerShip, time: number) {
+  const pose = voyagerPose(v, time);
+  if (!pose.visible) return;
+  const s = v.scale;
+  const x = pose.x;
+  const y = pose.y;
+  const dir = pose.dir;
+
+  // ردِ کشیده و کفِ سفیدِ آب پشتِ کشتیِ در حالِ عبور
+  c.save();
+  c.strokeStyle = "rgba(206,250,236,.26)";
+  c.lineWidth = 1.6 * s;
+  c.beginPath();
+  c.moveTo(x - dir * 18 * s, y + 1 * s);
+  c.quadraticCurveTo(x - dir * 36 * s, y - 4 * s, x - dir * 56 * s, y - 8 * s);
+  c.moveTo(x - dir * 18 * s, y + 3 * s);
+  c.quadraticCurveTo(x - dir * 36 * s, y + 8 * s, x - dir * 56 * s, y + 12 * s);
+  c.stroke();
+
+  c.translate(x, y);
+  if (dir < 0) c.scale(-1, 1);
+  if (Math.abs(pose.tilt) > 1e-4) c.rotate(pose.tilt * 0.45);
+  c.translate(-x, -y);
+  paintVessel(
+    c,
+    {
+      kind: "ship",
+      x,
+      y,
+      scale: s,
+      seed: v.seed,
+      hull: v.hull,
+      sail: v.sail,
+      cruise: true,
+      driftX: 0,
+      driftY: 0,
+      spin: 1,
+      phase: 0,
+    },
+    { x, y, tilt: pose.tilt, moving: true },
+  );
+  c.restore();
+}
+
 export function drawTerrain(c: Context, g: Game, time: number) {
-  const { islands, bridges, hills, vessels } = landscapeFor(g);
-  // شناورها روی آب و پیش از جزیره‌ها رسم می‌شوند تا هرگز روی خشکی نیفتند
+  const { islands, bridges, hills, vessels, voyagers } = landscapeFor(g);
+  // شناورها و کشتی‌های عبوری روی آب و پیش از جزیره‌ها رسم می‌شوند تا هرگز روی خشکی نیفتند
   for (const vessel of vessels) drawVessel(c, vessel, time);
+  for (const ship of voyagers) drawVoyager(c, ship, time);
   for (const island of islands) {
     polygon(c, island.points.map((p) => ({ x: p.x + 10, y: p.y + island.depth + 5 })), "rgba(6,40,40,.22)");
     c.strokeStyle = `rgba(121,228,202,${.12 + Math.sin(time * 1.1 + island.id) * .04})`;
