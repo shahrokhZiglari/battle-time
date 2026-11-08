@@ -15,7 +15,7 @@ const mem = new Map<string, string>();
 
 const saveMod = await import("../src/game/save");
 const blazorMod = await import("./blazor-battle");
-const { SettingsPanel, RandomMapPanel } = await import("../src/components/Panels");
+const { SettingsPanel, RandomMapPanel, PausePanel } = await import("../src/components/Panels");
 
 /* ۰) پیش‌فرض‌های تازه در وب و Blazor دقیقاً یکسان‌اند */
 {
@@ -237,5 +237,22 @@ console.log("PASS: Invalid or empty JSON payloads are safely rejected with clear
   );
   assert.equal(mapHtml.includes("راه‌های رندوم"), false, "randomRoads toggle is removed from RandomMapPanel");
   assert.ok(mapHtml.includes("۰ متر"), "RandomMapPanel displays 0m castle distance default");
+
+  const pauseHtml = renderToStaticMarkup(
+    React.createElement(PausePanel, {
+      name: "نقشهٔ رندوم",
+      onResume: () => {},
+      onRestart: () => {},
+      onNewRandomMap: () => {},
+      onLevels: () => {},
+      onSettings: () => {},
+      onMenu: () => {},
+      onRotate: () => {},
+      rotation: 0,
+      snd: true,
+      onSnd: () => {},
+    }),
+  );
+  assert.ok(pauseHtml.includes("ساخت نقشهٔ رندوم جدید"), "PausePanel includes the New Random Map button");
 }
-console.log("PASS: SettingsPanel & RandomMapPanel render updated defaults and omit randomRoads.");
+console.log("PASS: SettingsPanel, RandomMapPanel & PausePanel render updated defaults and New Random Map button.");

@@ -253,3 +253,13 @@
     resize: vertical;
 }
 .castle-root ::deep .cg-json-box:focus { outline: 2px solid #f0c264; border-color: #f0c264; }
+.castle-root ::deep .cg-ally-btn {
+    border-color: rgba(61, 220, 132, .65);
+    background: linear-gradient(180deg, rgba(61, 220, 132, .26), rgba(18, 133, 90, .38));
+    color: #e9fff2;
+    font-weight: 800;
+}
+.castle-root ::deep .cg-ally-btn:hover {
+    border-color: #3ddc84;
+    background: linear-gradient(180deg, rgba(61, 220, 132, .38), rgba(18, 133, 90, .52));
+}

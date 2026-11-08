@@ -513,7 +513,11 @@ export function command(canvas: HTMLCanvasElement, action: string, value: number
     if (error) { s.message = error; s.messageUntil = performance.now() + 3500; return snapshot(s); }
     s.settings.customMap = config;
     saveMapSettings(config); // فقط تنظیماتِ نقشه؛ تنظیماتِ سراسری دست‌نخورده می‌ماند
-    newGame(s, LEVELS.length, false, createRandomLevel(config));
+    newGame(s, LEVELS.length, false, createRandomLevel({ ...config, minDistance: s.settings.minCastleDistance }));
+    sfx.start();
+  }
+  else if (action === "restart") {
+    newGame(s, g.i, false, g.i >= LEVELS.length ? g.L : undefined);
     sfx.start();
   }
   else if (action === "start" && typeof value === "number" && value >= 0 && value < s.settings.unlockedLevel) { newGame(s, value, false); sfx.start(); }

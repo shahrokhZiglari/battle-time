@@ -376,6 +376,24 @@ export default function App() {
     sfx.start();
   }, [applyGlobalToGame, toastIt, updateSave, wire]);
 
+  const restartCurrentBattle = useCallback(() => {
+    const cur = gameRef.current;
+    if (!cur) return;
+    if (cur.i < LEVELS.length) {
+      startLevel(cur.i);
+      return;
+    }
+    const g = wire(new Game(LEVELS.length, false, cur.L));
+    gameRef.current = g;
+    applyGlobalToGame(saveRef.current);
+    setResult(null);
+    setHud(snapshot(g));
+    setScreen("game");
+    setBanner("شروع دوباره · " + cur.L.name);
+    window.setTimeout(() => setBanner(null), 2400);
+    sfx.start();
+  }, [applyGlobalToGame, startLevel, wire]);
+
   /* ---------- حلقهٔ رسم ---------- */
   useEffect(() => {
     demoRef.current();
@@ -761,7 +779,8 @@ export default function App() {
             g.paused = false;
             setScreen("game");
           }}
-          onRestart={() => g.i >= LEVELS.length ? startCustomMap(saveRef.current.customMap) : startLevel(g.i)}
+          onRestart={restartCurrentBattle}
+          onNewRandomMap={() => startCustomMap(saveRef.current.customMap)}
           onLevels={() => openSub("levels", "game")}
           onSettings={() => openSub("settings", "game")}
           onMenu={toMenu}
@@ -780,7 +799,8 @@ export default function App() {
           eCount={result.e}
           pCastles={result.pc}
           onNext={() => startLevel(Math.min(LEVELS.length - 1, g.i + 1))}
-          onRestart={() => g.i >= LEVELS.length ? startCustomMap(saveRef.current.customMap) : startLevel(g.i)}
+          onRestart={restartCurrentBattle}
+          onNewRandomMap={() => startCustomMap(saveRef.current.customMap)}
           onLevels={() => openSub("levels", "game")}
         />
       )}

@@ -1208,6 +1208,7 @@ export function RandomMapPanel({
 export function PausePanel({
   onResume,
   onRestart,
+  onNewRandomMap,
   onLevels,
   onSettings,
   onMenu,
@@ -1219,6 +1220,7 @@ export function PausePanel({
 }: {
   onResume: () => void;
   onRestart: () => void;
+  onNewRandomMap: () => void;
   onLevels: () => void;
   onSettings: () => void;
   onMenu: () => void;
@@ -1239,6 +1241,9 @@ export function PausePanel({
         <div className="mt-1 text-sm text-ash">{name}</div>
       </div>
       <div className="grid gap-2.5 px-6 py-4">
+        <Btn tone="ally" onClick={onNewRandomMap} className="w-full py-3 font-black">
+          🎲 ساخت نقشهٔ رندوم جدید
+        </Btn>
         <div className="grid grid-cols-2 gap-2.5">
           <Btn tone="steel" onClick={onRestart} className="py-3 font-bold">
             شروع دوباره
@@ -1304,6 +1309,7 @@ export function EndPanel({
   pCastles,
   onNext,
   onRestart,
+  onNewRandomMap,
   onLevels,
 }: {
   win: boolean;
@@ -1314,6 +1320,7 @@ export function EndPanel({
   pCastles: number;
   onNext: () => void;
   onRestart: () => void;
+  onNewRandomMap: () => void;
   onLevels: () => void;
 }) {
   const last = custom || index >= LEVELS.length - 1;
@@ -1361,8 +1368,11 @@ export function EndPanel({
                 مرحلهٔ بعد ←
               </Btn>
             )}
+            <Btn tone="ally" onClick={onNewRandomMap} className="py-3 font-black">
+              🎲 ساخت نقشهٔ رندوم جدید
+            </Btn>
             <Btn tone={win && !last ? "steel" : "brass"} onClick={onRestart} className="py-3 font-bold">
-              {win ? "بازی دوباره" : "تلاش دوباره"}
+              {win ? "بازی دوبارهٔ همین نقشه" : "تلاش دوباره"}
             </Btn>
             <Btn tone="ghost" onClick={onLevels} className="py-2.5 font-bold">
               فهرست مراحل

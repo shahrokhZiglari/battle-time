@@ -786,6 +786,35 @@ var PX_PER_METER = 6;
 var MAX_LAKES = 16;
 var MAX_SHIPS = 12;
 var MAX_BOATS = 16;
+var NATIVE_RANDOM = Math.random;
+var entropyCounter = 0;
+var recentLayouts = [];
+var recentThemes = [];
+function createUnpredictableRng() {
+  if (Math.random !== NATIVE_RANDOM) {
+    const seed2 = (Math.floor(Math.random() * 2147483647) || 1) >>> 0;
+    return { rand: () => Math.random(), seed: seed2, isMocked: true };
+  }
+  const buf = new Uint32Array(2);
+  if (typeof globalThis.crypto?.getRandomValues === "function") {
+    globalThis.crypto.getRandomValues(buf);
+  } else {
+    buf[0] = NATIVE_RANDOM() * 4294967295 >>> 0;
+    buf[1] = NATIVE_RANDOM() * 4294967295 >>> 0;
+  }
+  const hires = typeof globalThis.performance?.now === "function" ? Math.floor(globalThis.performance.now() * 1e3) : 0;
+  const timeMix = Math.imul((Date.now() ^ hires) >>> 0, 2654435761);
+  let state = (buf[0] ^ timeMix ^ Math.imul(++entropyCounter, 2246822507)) >>> 0;
+  if (state === 0) state = 1831565813;
+  const seed = (buf[1] ^ Math.imul(state, 3266489909)) >>> 0 || 1;
+  const rand = () => {
+    state = state + 1831565813 | 0;
+    let t = Math.imul(state ^ state >>> 15, 1 | state);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+  return { rand, seed, isMocked: false };
+}
 function normalizeRandomMap(input) {
   const source = { ...DEFAULT_RANDOM_MAP, ...input };
   const whole = (value, low, high) => Number.isFinite(Number(value)) ? Math.max(low, Math.min(high, Math.floor(Number(value)))) : low;
@@ -822,15 +851,15 @@ function validateRandomMap(input) {
   }
   return null;
 }
-function shuffled(items) {
+function shuffled(items, rand) {
   for (let i = items.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rand() * (i + 1));
     [items[i], items[j]] = [items[j], items[i]];
   }
   return items;
 }
-function furthestStarts(points, count) {
-  const chosen = [Math.floor(Math.random() * points.length)];
+function furthestStarts(points, count, rand) {
+  const chosen = [Math.floor(rand() * points.length)];
   while (chosen.length < count) {
     let best = -1;
     let bestDistance = -1;
@@ -838,25 +867,29 @@ function furthestStarts(points, count) {
       if (chosen.includes(i)) continue;
       const p = points[i];
       const minDistance = Math.min(...chosen.map((index) => Math.hypot(p.x - points[index].x, p.y - points[index].y)));
-      if (minDistance > bestDistance) {
+      const score = minDistance * (0.9 + rand() * 0.2);
+      if (score > bestDistance) {
         best = i;
-        bestDistance = minDistance;
+        bestDistance = score;
       }
     }
     if (best >= 0) chosen.push(best);
   }
-  return chosen;
+  return shuffled(chosen, rand);
 }
-var LAYOUTS = ["scatter", "rows", "ring", "clusters", "valley"];
+var LAYOUTS = ["scatter", "rows", "ring", "clusters", "valley", "twin", "spiral", "cross"];
 var LAYOUT_LABEL = {
-  scatter: "پراکنده",
-  rows: "ردیفی",
-  ring: "حلقه‌ای",
-  clusters: "خوشه‌ای",
-  valley: "دره"
+  scatter: "مجمع‌الجزایر آزاد",
+  rows: "جبهه‌های موجی",
+  ring: "حلقه‌ای چرخان",
+  clusters: "خوشه‌های جزیره‌ای",
+  valley: "تنگهٔ مارپیچ",
+  twin: "دو قارهٔ روبه‌رو",
+  spiral: "مارپیچ کهکشانی",
+  cross: "چهارراه دریایی"
 };
 function repairOverlap(cells, sep, w, h, margin) {
-  for (let pass = 0; pass < 60; pass++) {
+  for (let pass = 0; pass < 70; pass++) {
     let moved = false;
     for (let i = 0; i < cells.length; i++) {
       for (let j = i + 1; j < cells.length; j++) {
@@ -880,57 +913,90 @@ function repairOverlap(cells, sep, w, h, margin) {
     if (!moved) break;
   }
 }
-function scatterCells(count, w, h, margin, sep, centerClear) {
+function applySymmetryTransform(cells, w, h, margin, rand) {
+  const mirrorX = rand() < 0.5;
+  const mirrorY = rand() < 0.5;
+  const rot = (rand() - 0.5) * 0.46;
+  const cos = Math.cos(rot);
+  const sin = Math.sin(rot);
+  const cx = w / 2;
+  const cy = h / 2;
+  const scaleY = h / w;
+  for (const p of cells) {
+    let nx = (p.x - cx) * (mirrorX ? -1 : 1);
+    let ny = (p.y - cy) / scaleY * (mirrorY ? -1 : 1);
+    const rx = nx * cos - ny * sin;
+    const ry = (nx * sin + ny * cos) * scaleY;
+    p.x = Math.max(margin * 0.65, Math.min(w - margin * 0.65, cx + rx));
+    p.y = Math.max(margin * 0.65, Math.min(h - margin * 0.65, cy + ry));
+  }
+}
+function scatterCells(count, w, h, margin, sep, centerClear, rand) {
   const cells = [];
   let minSep = sep;
   for (let attempt = 0; attempt < 6e3 && cells.length < count; attempt++) {
-    const p = { x: margin + Math.random() * (w - margin * 2), y: margin + Math.random() * (h - margin * 2) };
+    const p = { x: margin + rand() * (w - margin * 2), y: margin + rand() * (h - margin * 2) };
     if (centerClear > 0 && Math.hypot(p.x - w / 2, p.y - h / 2) < centerClear) continue;
     if (cells.every((q) => Math.hypot(q.x - p.x, q.y - p.y) >= minSep)) cells.push(p);
     else if (attempt % 700 === 699) minSep = Math.max(88, minSep * 0.9);
   }
   while (cells.length < count) {
-    cells.push({ x: margin + Math.random() * (w - margin * 2), y: margin + Math.random() * (h - margin * 2) });
+    cells.push({ x: margin + rand() * (w - margin * 2), y: margin + rand() * (h - margin * 2) });
   }
   return cells;
 }
-function rowsCells(count, w, h, margin, large) {
-  const columns = Math.max(2, Math.ceil(Math.sqrt(count * w / h)));
+function rowsCells(count, w, h, margin, large, rand) {
+  const transpose = rand() < 0.4;
+  const spanA = transpose ? h - margin * 2 : w - margin * 2;
+  const spanB = transpose ? w - margin * 2 : h - margin * 2;
+  const columns = Math.max(2, Math.ceil(Math.sqrt(count * (spanA / spanB)) + (rand() - 0.5) * 1.2));
   const rows = Math.max(2, Math.ceil(count / columns));
-  const left = margin, right = w - margin, top = margin, bottom = h - margin;
-  const rowCounts = Array.from({ length: rows }, (_, row) => Math.floor(count / rows) + (row < count % rows ? 1 : 0));
-  const jitter = large ? 52 : 16;
-  const curveAmp = large ? 24 + Math.random() * 46 : 7 + Math.random() * 12;
-  const curveFreq = 0.55 + Math.random() * 1.15;
-  const curvePhase = Math.random() * Math.PI * 2;
+  const rowCounts = shuffled(
+    Array.from({ length: rows }, (_, row) => Math.floor(count / rows) + (row < count % rows ? 1 : 0)),
+    rand
+  );
+  const jitter = large ? 62 : 20;
+  const curveAmp = large ? 28 + rand() * 58 : 9 + rand() * 15;
+  const curveFreq = 0.5 + rand() * 1.35;
+  const curvePhase = rand() * Math.PI * 2;
+  const shear = (rand() - 0.5) * (large ? 90 : 28);
   const cells = [];
   for (let row = 0; row < rows; row++) {
     const n = rowCounts[row];
-    const squeeze = 0.72 + Math.random() * 0.28;
-    const width = (right - left) * (row === 0 || row === rows - 1 ? 0.82 + Math.random() * 0.16 : squeeze);
-    const indent = (right - left - width) * (0.2 + Math.random() * 0.6);
+    if (n <= 0) continue;
+    const squeeze = 0.66 + rand() * 0.34;
+    const width = spanA * squeeze;
+    const indent = (spanA - width) * rand();
     const step = width / Math.max(1, n - 1);
+    const baseB = margin + row / Math.max(1, rows - 1) * spanB;
     for (let col = 0; col < n; col++) {
-      cells.push({
-        x: n === 1 ? w / 2 + (Math.random() - 0.5) * jitter * 2 : left + indent + col * step + (Math.random() - 0.5) * jitter,
-        y: top + row * (bottom - top) / Math.max(1, rows - 1) + Math.sin(col * curveFreq + row * 1.3 + curvePhase) * curveAmp + (Math.random() - 0.5) * jitter
-      });
+      const u = n === 1 ? 0.5 : col / (n - 1);
+      const a = n === 1 ? margin + spanA * (0.25 + rand() * 0.5) : margin + indent + col * step + (rand() - 0.5) * jitter;
+      const b = baseB + (u - 0.5) * shear + Math.sin(col * curveFreq + row * 1.4 + curvePhase) * curveAmp + (rand() - 0.5) * jitter;
+      cells.push(transpose ? { x: b, y: a } : { x: a, y: b });
     }
   }
   return cells;
 }
-function ringCells(count, w, h, margin) {
-  const cx = w / 2, cy = h / 2;
-  const maxRx = w / 2 - margin, maxRy = h / 2 - margin;
-  const rings = Math.max(1, Math.min(4, Math.ceil(count / 9)));
+function ringCells(count, w, h, margin, rand) {
+  const cx = w / 2 + (rand() - 0.5) * w * 0.06;
+  const cy = h / 2 + (rand() - 0.5) * h * 0.06;
+  const maxRx = w / 2 - margin;
+  const maxRy = h / 2 - margin;
+  const rings = Math.max(1, Math.min(4, Math.ceil(count / (7 + Math.floor(rand() * 4)))));
+  const baseAngle = rand() * Math.PI * 2;
+  const spinDir = rand() < 0.5 ? -1 : 1;
+  const arcSpan = rand() < 0.45 ? Math.PI * (1.35 + rand() * 0.4) : Math.PI * 2;
   const cells = [];
   let placed = 0;
   for (let r = 0; r < rings; r++) {
     const n = Math.ceil((count - placed) / (rings - r));
-    const radius = 0.38 + 0.58 * (rings === 1 ? 0.9 : r / Math.max(1, rings - 1));
+    const radius = 0.4 + 0.56 * (rings === 1 ? 0.88 : r / Math.max(1, rings - 1));
+    const ringOffset = baseAngle + spinDir * r * (0.7 + rand() * 0.9);
     for (let k = 0; k < n && placed < count; k++) {
-      const angle = k / n * Math.PI * 2 + r * 1.1 + (Math.random() - 0.5) * 0.55;
-      const wobble = 0.82 + Math.random() * 0.34;
+      const frac = arcSpan < Math.PI * 1.99 && n > 1 ? k / (n - 1) : k / n;
+      const angle = ringOffset + spinDir * frac * arcSpan + (rand() - 0.5) * 0.48;
+      const wobble = 0.78 + rand() * 0.38;
       cells.push({
         x: cx + Math.cos(angle) * maxRx * radius * wobble,
         y: cy + Math.sin(angle) * maxRy * radius * wobble
@@ -940,21 +1006,24 @@ function ringCells(count, w, h, margin) {
   }
   return cells;
 }
-function clusterCells(count, w, h, margin, sep, centerClear) {
-  const nClusters = Math.max(2, Math.min(5, Math.round(count / 4) + 1));
+function clusterCells(count, w, h, margin, sep, centerClear, rand) {
+  const nClusters = Math.max(2, Math.min(5, 2 + Math.floor(rand() * 3) + (count > 18 ? 1 : 0)));
   const centers = [];
-  while (centers.length < nClusters) {
-    const p = { x: margin + Math.random() * (w - margin * 2), y: margin + Math.random() * (h - margin * 2) };
+  for (let guard = 0; guard < 800 && centers.length < nClusters; guard++) {
+    const p = { x: margin + rand() * (w - margin * 2), y: margin + rand() * (h - margin * 2) };
     if (centerClear > 0 && Math.hypot(p.x - w / 2, p.y - h / 2) < centerClear * 0.7) continue;
-    if (centers.every((q) => Math.hypot(q.x - p.x, q.y - p.y) > sep * 1.15)) centers.push(p);
+    if (centers.every((q) => Math.hypot(q.x - p.x, q.y - p.y) > sep * 1.25)) centers.push(p);
+  }
+  while (centers.length < nClusters) {
+    centers.push({ x: margin + rand() * (w - margin * 2), y: margin + rand() * (h - margin * 2) });
   }
   const cells = [];
   let minSep = sep;
   for (let attempt = 0; attempt < 6e3 && cells.length < count; attempt++) {
     const center = centers[attempt % centers.length];
-    const angle = Math.random() * Math.PI * 2;
-    const radius = Math.sqrt(Math.random()) * sep * 1.75;
-    const p = { x: center.x + Math.cos(angle) * radius, y: center.y + Math.sin(angle) * radius * 0.82 };
+    const angle = rand() * Math.PI * 2;
+    const radius = Math.sqrt(rand()) * sep * (1.4 + rand() * 0.85);
+    const p = { x: center.x + Math.cos(angle) * radius, y: center.y + Math.sin(angle) * radius * 0.84 };
     if (p.x < margin || p.x > w - margin || p.y < margin || p.y > h - margin) continue;
     if (centerClear > 0 && Math.hypot(p.x - w / 2, p.y - h / 2) < centerClear) continue;
     if (cells.every((q) => Math.hypot(q.x - p.x, q.y - p.y) >= minSep)) cells.push(p);
@@ -962,22 +1031,25 @@ function clusterCells(count, w, h, margin, sep, centerClear) {
   }
   while (cells.length < count) {
     const center = centers[cells.length % centers.length];
-    cells.push({ x: center.x + (Math.random() - 0.5) * sep, y: center.y + (Math.random() - 0.5) * sep });
+    cells.push({ x: center.x + (rand() - 0.5) * sep, y: center.y + (rand() - 0.5) * sep });
   }
   return cells;
 }
-function valleyCells(count, w, h, margin, sep) {
-  const vertical = Math.random() < 0.5;
-  const flip = Math.random() < 0.5 ? -1 : 1;
-  const amp = h * (0.1 + Math.random() * 0.16);
-  const freq = 1 + Math.random() * 1.6;
-  const phase = Math.random() * Math.PI * 2;
+function valleyCells(count, w, h, margin, sep, rand) {
+  const vertical = rand() < 0.45;
+  const diagSlope = rand() < 0.3 ? 0 : rand() < 0.5 ? -1 : 1;
+  const waveFlip = rand() < 0.5 ? -1 : 1;
+  const amp = (vertical ? w : h) * (0.11 + rand() * 0.18);
+  const freq = 0.85 + rand() * 1.85;
+  const phase = rand() * Math.PI * 2;
   const cells = [];
   for (let i = 0; i < count; i++) {
-    const t = (i + 0.5) / count + (Math.random() - 0.5) * 0.55 / count;
+    const t = Math.max(0.02, Math.min(0.98, (i + 0.5) / count + (rand() - 0.5) * 0.65 / count));
     const along = margin + t * ((vertical ? h : w) - margin * 2);
-    const wave = Math.sin(t * Math.PI * freq + phase) * amp + (Math.random() - 0.5) * sep * 0.9;
-    const across = t * ((vertical ? w : h) - margin * 2) + margin + wave * flip;
+    const crossSpan = (vertical ? w : h) - margin * 2;
+    const baseRatio = diagSlope === 0 ? 0.5 : diagSlope > 0 ? t : 1 - t;
+    const wave = Math.sin(t * Math.PI * freq + phase) * amp * waveFlip + (rand() - 0.5) * sep * 0.85;
+    const across = margin + baseRatio * crossSpan + wave;
     const p = vertical ? { x: across, y: along } : { x: along, y: across };
     p.x = Math.max(margin, Math.min(w - margin, p.x));
     p.y = Math.max(margin, Math.min(h - margin, p.y));
@@ -985,88 +1057,199 @@ function valleyCells(count, w, h, margin, sep) {
   }
   return cells;
 }
-function centralizeTowers(cells, towerCount, w, h) {
+function twinCells(count, w, h, margin, rand) {
+  const angle = rand() * Math.PI * 2;
+  const dx = Math.cos(angle) * (w * 0.27);
+  const dy = Math.sin(angle) * (h * 0.27);
+  const lobes = [
+    { x: w / 2 - dx, y: h / 2 - dy },
+    { x: w / 2 + dx, y: h / 2 + dy }
+  ];
+  const spreadX = w * (0.17 + rand() * 0.08);
+  const spreadY = h * (0.2 + rand() * 0.09);
+  const cells = [];
+  for (let i = 0; i < count; i++) {
+    const lobe = lobes[i % 2];
+    const a = rand() * Math.PI * 2;
+    const r = Math.sqrt(rand());
+    cells.push({
+      x: Math.max(margin, Math.min(w - margin, lobe.x + Math.cos(a) * spreadX * r)),
+      y: Math.max(margin, Math.min(h - margin, lobe.y + Math.sin(a) * spreadY * r))
+    });
+  }
+  return cells;
+}
+function spiralCells(count, w, h, margin, rand) {
+  const cx = w / 2;
+  const cy = h / 2;
+  const maxRx = w / 2 - margin;
+  const maxRy = h / 2 - margin;
+  const arms = 2 + Math.floor(rand() * 2);
+  const spin = (rand() < 0.5 ? -1 : 1) * (2.4 + rand() * 1.9);
+  const baseAngle = rand() * Math.PI * 2;
+  const cells = [];
+  for (let i = 0; i < count; i++) {
+    const arm = i % arms;
+    const u = Math.min(1, (Math.floor(i / arms) + 0.45 + (rand() - 0.5) * 0.3) / Math.max(1, Math.ceil(count / arms)));
+    const r = 0.24 + 0.74 * Math.sqrt(u);
+    const theta = baseAngle + arm / arms * Math.PI * 2 + u * spin + (rand() - 0.5) * 0.35;
+    cells.push({
+      x: cx + Math.cos(theta) * maxRx * r,
+      y: cy + Math.sin(theta) * maxRy * r
+    });
+  }
+  return cells;
+}
+function crossCells(count, w, h, margin, rand) {
+  const cx = w / 2;
+  const cy = h / 2;
+  const maxRx = w / 2 - margin;
+  const maxRy = h / 2 - margin;
+  const branches = 3 + Math.floor(rand() * 3);
+  const baseAngle = rand() * Math.PI * 2;
+  const bend = (rand() - 0.5) * 0.55;
+  const cells = [];
+  for (let i = 0; i < count; i++) {
+    const br = i % branches;
+    const rank = Math.floor(i / branches);
+    const maxRank = Math.max(1, Math.ceil(count / branches) - 1);
+    const r = 0.22 + rank / maxRank * 0.74 + (rand() - 0.5) * 0.1;
+    const theta = baseAngle + br / branches * Math.PI * 2 + r * bend + (rand() - 0.5) * 0.28;
+    cells.push({
+      x: Math.max(margin, Math.min(w - margin, cx + Math.cos(theta) * maxRx * r)),
+      y: Math.max(margin, Math.min(h - margin, cy + Math.sin(theta) * maxRy * r))
+    });
+  }
+  return cells;
+}
+function centralizeTowers(cells, towerCount, w, h, rand) {
   if (towerCount <= 0) return [];
   const ranked = cells.map((p, index) => ({
     index,
     distance: ((p.x - w / 2) / w) ** 2 + ((p.y - h / 2) / h) ** 2
   })).sort((a, b) => a.distance - b.distance).slice(0, towerCount);
-  for (const { index } of ranked) {
+  const baseAngle = rand() * Math.PI * 2;
+  ranked.forEach(({ index }, k) => {
     const p = cells[index];
-    for (let guard = 0; guard < 4; guard++) {
+    const targetAngle = baseAngle + k / Math.max(1, towerCount) * Math.PI * 2 + (rand() - 0.5) * 0.7;
+    const targetRadius = towerCount === 1 ? rand() * 0.11 : 0.05 + rand() * 0.11;
+    const anchorX = w / 2 + Math.cos(targetAngle) * w * targetRadius;
+    const anchorY = h / 2 + Math.sin(targetAngle) * h * targetRadius;
+    for (let guard = 0; guard < 5; guard++) {
       const distance2 = Math.hypot((p.x - w / 2) / w, (p.y - h / 2) / h);
-      if (distance2 < 0.17) break;
-      p.x += (w / 2 - p.x) * 0.34;
-      p.y += (h / 2 - p.y) * 0.34;
+      if (distance2 < 0.165) {
+        p.x = p.x * 0.45 + anchorX * 0.55;
+        p.y = p.y * 0.45 + anchorY * 0.55;
+        break;
+      }
+      p.x += (anchorX - p.x) * 0.42;
+      p.y += (anchorY - p.y) * 0.42;
+    }
+  });
+  return ranked.map((item) => item.index);
+}
+function keepTowersCentral(cells, towerIndices, w, h) {
+  for (const index of towerIndices) {
+    const p = cells[index];
+    const dx = (p.x - w / 2) / w;
+    const dy = (p.y - h / 2) / h;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 0.215) {
+      const scale = 0.205 / dist;
+      p.x = w / 2 + dx * scale * w;
+      p.y = h / 2 + dy * scale * h;
     }
   }
-  return ranked.map((item) => item.index);
 }
 function createRandomLevel(raw) {
   const config = normalizeRandomMap(raw);
   const error = validateRandomMap(config);
   if (error) throw new Error(error);
+  const { rand, seed, isMocked } = createUnpredictableRng();
   const castleTypes = [
     ...Array.from({ length: config.normal }, () => "barracks"),
     ...Array.from({ length: config.fast }, () => "speed"),
     ...Array.from({ length: config.heavy }, () => "heavy")
   ];
   const towerTypes = Array.from({ length: config.towers }, () => "tower");
-  shuffled(castleTypes);
+  shuffled(castleTypes, rand);
   const total = castleTypes.length + towerTypes.length;
   const margin = config.largeMap ? 110 : 82;
-  const spacing = Math.max(90, config.minDistance * PX_PER_METER);
+  const naturalMinSep = config.largeMap ? total <= 14 ? 156 : total <= 24 ? 126 : 94 : 96;
+  const overlapSep = Math.max(naturalMinSep, config.minDistance * PX_PER_METER);
+  const layoutSpread = Math.max(config.largeMap ? 185 : 116, overlapSep);
   const columns = Math.max(2, Math.ceil(Math.sqrt(total * CFG.W / CFG.H)));
   const rows = Math.max(2, Math.ceil(total / columns));
-  const baseW = margin * 2 + Math.max(0, columns - 1) * spacing;
-  const baseH = margin * 2 + Math.max(0, rows - 1) * spacing;
-  const worldWidth = config.largeMap ? Math.round(Math.max(1350, baseW) * (1 + Math.random() * 0.22)) : CFG.W;
-  const worldHeight = config.largeMap ? Math.round(Math.max(860, baseH) * (1 + Math.random() * 0.2)) : CFG.H;
-  const pool = total > 16 ? ["scatter", "rows"] : [...LAYOUTS];
-  const layout = pool[Math.floor(Math.random() * pool.length)];
-  const centerClear = config.towers > 0 && layout !== "rows" && layout !== "ring" ? Math.min(worldWidth, worldHeight) * 0.16 : 0;
+  const baseW = margin * 2 + Math.max(0, columns - 1) * overlapSep;
+  const baseH = margin * 2 + Math.max(0, rows - 1) * overlapSep;
+  const worldWidth = config.largeMap ? Math.round(Math.max(1320, baseW) * (0.96 + rand() * 0.34)) : CFG.W;
+  const worldHeight = config.largeMap ? Math.round(Math.max(830, baseH) * (0.96 + rand() * 0.3)) : CFG.H;
+  const basePool = total > 24 ? ["scatter", "rows", "clusters", "twin", "spiral"] : config.largeMap ? [...LAYOUTS] : ["scatter", "rows", "ring", "clusters", "twin", "cross"];
+  const freshLayouts = !isMocked ? basePool.filter((l) => !recentLayouts.includes(l)) : basePool;
+  const layoutPool = freshLayouts.length > 0 ? freshLayouts : basePool;
+  const layout = layoutPool[Math.floor(rand() * layoutPool.length)];
+  if (!isMocked) {
+    recentLayouts.push(layout);
+    if (recentLayouts.length > 3) recentLayouts.shift();
+  }
+  const centerClear = config.towers > 0 && layout !== "rows" && layout !== "ring" && layout !== "cross" ? Math.min(worldWidth, worldHeight) * 0.15 : 0;
   let cells;
-  if (layout === "rows") cells = rowsCells(total, worldWidth, worldHeight, margin, config.largeMap);
-  else if (layout === "ring") cells = ringCells(total, worldWidth, worldHeight, margin);
-  else if (layout === "clusters") cells = clusterCells(total, worldWidth, worldHeight, margin, spacing, centerClear);
-  else if (layout === "valley" && config.largeMap) cells = valleyCells(total, worldWidth, worldHeight, margin, spacing);
-  else cells = scatterCells(total, worldWidth, worldHeight, margin, spacing, centerClear);
-  const towerCells = centralizeTowers(cells, config.towers, worldWidth, worldHeight);
-  repairOverlap(cells, config.largeMap ? spacing : 96, worldWidth, worldHeight, margin);
+  if (layout === "rows") cells = rowsCells(total, worldWidth, worldHeight, margin, config.largeMap, rand);
+  else if (layout === "ring") cells = ringCells(total, worldWidth, worldHeight, margin, rand);
+  else if (layout === "clusters") cells = clusterCells(total, worldWidth, worldHeight, margin, layoutSpread, centerClear, rand);
+  else if (layout === "valley") cells = valleyCells(total, worldWidth, worldHeight, margin, layoutSpread, rand);
+  else if (layout === "twin") cells = twinCells(total, worldWidth, worldHeight, margin, rand);
+  else if (layout === "spiral") cells = spiralCells(total, worldWidth, worldHeight, margin, rand);
+  else if (layout === "cross") cells = crossCells(total, worldWidth, worldHeight, margin, rand);
+  else cells = scatterCells(total, worldWidth, worldHeight, margin, layoutSpread, centerClear, rand);
+  applySymmetryTransform(cells, worldWidth, worldHeight, margin, rand);
+  const towerCells = centralizeTowers(cells, config.towers, worldWidth, worldHeight, rand);
+  repairOverlap(cells, config.largeMap ? overlapSep : 96, worldWidth, worldHeight, margin);
+  keepTowersCentral(cells, towerCells, worldWidth, worldHeight);
+  repairOverlap(cells, config.largeMap ? Math.min(overlapSep, 90) : 86, worldWidth, worldHeight, margin);
   const towerCellSet = new Set(towerCells);
   const castleCells = cells.map((_, index) => index).filter((index) => !towerCellSet.has(index));
-  const starts = furthestStarts(castleCells.map((index) => cells[index]), config.players).map((index) => castleCells[index]);
+  const starts = furthestStarts(castleCells.map((index) => cells[index]), config.players, rand).map((index) => castleCells[index]);
   const reserved = new Set(starts);
-  const available = shuffled(castleCells.filter((index) => !reserved.has(index)));
+  const available = shuffled(castleCells.filter((index) => !reserved.has(index)), rand);
   const startTypes = castleTypes.splice(0, config.players);
   const buildings = [];
   for (let player = 0; player < config.players; player++) {
     const p = cells[starts[player]];
     buildings.push([p.x, p.y, player + 1, startTypes[player], startTypes[player] === "heavy" ? 15 : 22]);
   }
-  const neutralTypes = shuffled(castleTypes);
+  const neutralTypes = shuffled(castleTypes, rand);
   neutralTypes.forEach((type, index) => {
     const p = cells[available[index]];
-    const troops = type === "tower" ? 7 + Math.floor(Math.random() * 4) : 4 + Math.floor(Math.random() * 6);
+    const troops = type === "tower" ? 7 + Math.floor(rand() * 4) : 4 + Math.floor(rand() * 6);
     buildings.push([p.x, p.y, 0, type, troops]);
   });
   towerCells.forEach((cellIndex) => {
     const p = cells[cellIndex];
-    buildings.push([p.x, p.y, 0, "tower", 7 + Math.floor(Math.random() * 4)]);
+    buildings.push([p.x, p.y, 0, "tower", 7 + Math.floor(rand() * 4)]);
   });
+  const allThemes = Array.from({ length: THEME_COUNT }, (_, i) => i);
+  const freshThemes = !isMocked ? allThemes.filter((t) => !recentThemes.includes(t)) : allThemes;
+  const themePool = freshThemes.length > 0 ? freshThemes : allThemes;
+  const theme = themePool[Math.floor(rand() * themePool.length)];
+  if (!isMocked) {
+    recentThemes.push(theme);
+    if (recentThemes.length > 2) recentThemes.shift();
+  }
   const summary = `${config.normal} عادی، ${config.fast} سریع، ${config.heavy} سنگین و ${config.towers} برج`;
   return {
     name: "نقشهٔ رندوم",
-    ai: 0.55 + Math.random() * 0.3,
+    ai: 0.55 + rand() * 0.3,
     hint: `${config.players} بازیکن · ${summary} · ${config.lakes} خلیج · ${config.ships} کشتی و ${config.boats} قایق · چیدمان ${LAYOUT_LABEL[layout]}. قلعه‌های شروع در اطراف نقشه پخش شده‌اند؛ برج‌ها و بقیهٔ قلعه‌ها خنثی هستند.`,
     b: buildings,
     worldWidth,
     worldHeight,
     largeMap: config.largeMap,
-    theme: Math.floor(Math.random() * THEME_COUNT),
+    theme,
     lakes: config.lakes,
     ships: config.ships,
-    boats: config.boats
+    boats: config.boats,
+    seed
   };
 }
 
@@ -1140,7 +1323,7 @@ function placeVessels(g, ships, boats, shores) {
     const clear = (kind === "ship" ? 34 : 20) * scale;
     const cruise = out.length % 3 === 0;
     const drift = cruise ? kind === "ship" ? 20 : 13 : 0;
-    const keep = clear + drift;
+    const keep = clear + drift + 4;
     for (let guard = 0; guard < 260; guard++) {
       const x = margin + Math.random() * (g.worldWidth - margin * 2);
       const y = margin + Math.random() * (g.worldHeight - margin * 2);
@@ -1340,81 +1523,97 @@ function landscapeFor(g) {
   if (known?.buildings === g.bs && known.links === g.links) return known.landscape;
   const themeIndex = g.demo ? 0 : Math.abs(g.L.theme ?? Math.floor(g.i / 10)) % THEMES.length;
   const theme = THEMES[themeIndex];
+  const mapSalt = (g.L.seed ?? 0) % 9973 * 0.37;
   const scenery = [];
   const hills = [];
   const vessels = [];
   const lakeCount = Math.max(0, Math.min(MAX_LAKES, g.L.lakes ?? 0));
-  const bayIslands = /* @__PURE__ */ new Set();
-  if (lakeCount > 0 && g.bs.length > 1) {
-    const order = g.bs.map((b) => b.id);
-    for (let i = order.length - 1; i > 0; i--) {
-      const j = Math.floor(noise2(g.i * 97 + i * 13 + 5) * (i + 1));
-      [order[i], order[j]] = [order[j], order[i]];
+  const bayOrder = g.bs.map((b) => b.id);
+  if (lakeCount > 0 && bayOrder.length > 1) {
+    for (let i = bayOrder.length - 1; i > 0; i--) {
+      const j = Math.floor(noise2(g.i * 97 + i * 13 + 5 + mapSalt) * (i + 1));
+      [bayOrder[i], bayOrder[j]] = [bayOrder[j], bayOrder[i]];
     }
-    order.slice(0, Math.min(lakeCount, order.length)).forEach((id) => bayIslands.add(id));
   }
-  const islands = g.bs.map((b) => {
+  const basePolys = /* @__PURE__ */ new Map();
+  for (const b of g.bs) {
     const nearest = Math.min(...g.bs.filter((q) => q !== b).map((q) => Math.hypot(q.x - b.x, (q.y - b.y) * 1.15)));
     const rx = Math.max(70, Math.min(190, nearest * 0.56 + 28));
     const ry = rx * 0.72;
-    let points = ring(b.x, b.y + 8, rx, ry, 10, 0.16 + noise2(b.id * 5 + g.i) * 0.25).map((p, i) => ({ x: b.x + (p.x - b.x) * (0.88 + noise2(i * 7 + b.id * 13) * 0.17), y: b.y + (p.y - b.y) * (0.88 + noise2(i * 9 + b.id * 3) * 0.17) }));
+    let points = ring(b.x, b.y + 8, rx, ry, 10, 0.16 + noise2(b.id * 5 + g.i + mapSalt) * 0.25).map((p, i) => ({ x: b.x + (p.x - b.x) * (0.88 + noise2(i * 7 + b.id * 13 + mapSalt) * 0.17), y: b.y + (p.y - b.y) * (0.88 + noise2(i * 9 + b.id * 3 + mapSalt) * 0.17) }));
     for (const other of g.bs) {
       if (other === b) continue;
       const nx = other.x - b.x, ny = (other.y - b.y) * 1.4;
       points = clip(points, nx, ny, nx * (b.x + other.x) / 2 + ny * (b.y + other.y) / 2);
     }
     points = points.map((p) => ({ x: b.x + (p.x - b.x) * 0.9, y: b.y + (p.y - b.y) * 0.9 }));
-    if (bayIslands.has(b.id)) {
-      const center = { x: b.x, y: b.y + 4 };
-      let bestVertex = -1;
-      let bestScore = -Infinity;
-      for (let i = 0; i < points.length; i++) {
-        const v = points[i];
-        const clearance = Math.hypot(v.x - center.x, v.y - center.y);
-        if (clearance < 88) continue;
-        if (g.links.some(([ia, ib]) => distanceToLine(v, g.bs[ia], g.bs[ib]) < 62)) continue;
-        if (!bayCandidate(points, center, i, 34)) continue;
-        const openness = Math.min(...g.bs.filter((q) => q !== b).map((q) => Math.hypot(q.x - v.x, (q.y - v.y) * 1.2)));
-        const score = Math.min(clearance, 190) * 0.35 + Math.min(openness, 220) * 0.65;
-        if (score > bestScore) {
-          bestScore = score;
-          bestVertex = i;
-        }
-      }
-      if (bestVertex >= 0) {
-        const v = points[bestVertex];
-        const reach = Math.hypot(v.x - center.x, v.y - center.y);
-        const clearance = Math.min(...g.links.flatMap(([ia, ib]) => {
-          const A = g.bs[ia], B = g.bs[ib];
-          const dx = B.x - A.x, dy = B.y - A.y;
-          const len2 = dx * dx + dy * dy || 1;
-          const t = Math.max(0, Math.min(1, ((v.x - A.x) * dx + (v.y - A.y) * dy) / len2));
-          return [Math.hypot(v.x - A.x - t * dx, v.y - A.y - t * dy)];
-        }).concat([999]));
-        const carve = Math.max(30, Math.min(76, Math.min(reach - 86, clearance - 20)));
-        const carved = carveBay(points, center, bestVertex, carve);
-        if (carved.length >= 6) {
-          points = carved;
-        }
+    if (points.length > 12) {
+      points = points.filter((p, i) => {
+        const next = points[(i + 1) % points.length];
+        return Math.hypot(p.x - next.x, p.y - next.y) >= 12;
+      });
+    }
+    basePolys.set(b.id, { b, rx, ry, points });
+  }
+  let baysCarved = 0;
+  for (const id of bayOrder) {
+    if (baysCarved >= lakeCount) break;
+    const entry = basePolys.get(id);
+    if (!entry) continue;
+    const { b, points } = entry;
+    const center = { x: b.x, y: b.y + 4 };
+    let bestVertex = -1;
+    let bestScore = -Infinity;
+    for (let i = 0; i < points.length; i++) {
+      const v = points[i];
+      const clearance = Math.hypot(v.x - center.x, v.y - center.y);
+      if (clearance < 84) continue;
+      if (g.links.some(([ia, ib]) => distanceToLine(v, g.bs[ia], g.bs[ib]) < 62)) continue;
+      if (!bayCandidate(points, center, i, 32)) continue;
+      const openness = Math.min(...g.bs.filter((q) => q !== b).map((q) => Math.hypot(q.x - v.x, (q.y - v.y) * 1.2)));
+      const score = Math.min(clearance, 190) * 0.35 + Math.min(openness, 220) * 0.65;
+      if (score > bestScore) {
+        bestScore = score;
+        bestVertex = i;
       }
     }
-    const depth = 15 + noise2(b.id * 17 + 6) * 38 + (noise2(b.id * 29 + 3) > 0.7 ? 14 : 0);
+    if (bestVertex >= 0) {
+      const v = points[bestVertex];
+      const reach = Math.hypot(v.x - center.x, v.y - center.y);
+      const clearance = Math.min(...g.links.flatMap(([ia, ib]) => {
+        const A = g.bs[ia], B = g.bs[ib];
+        const dx = B.x - A.x, dy = B.y - A.y;
+        const len2 = dx * dx + dy * dy || 1;
+        const t = Math.max(0, Math.min(1, ((v.x - A.x) * dx + (v.y - A.y) * dy) / len2));
+        return [Math.hypot(v.x - A.x - t * dx, v.y - A.y - t * dy)];
+      }).concat([999]));
+      const carve = Math.max(30, Math.min(76, Math.min(reach - 82, clearance - 20)));
+      const carved = carveBay(points, center, bestVertex, carve);
+      if (carved.length >= 6) {
+        entry.points = carved;
+        baysCarved++;
+      }
+    }
+  }
+  const islands = g.bs.map((b) => {
+    const { rx, ry, points } = basePolys.get(b.id);
+    const depth = 15 + noise2(b.id * 17 + 6 + mapSalt) * 38 + (noise2(b.id * 29 + 3 + mapSalt) > 0.7 ? 14 : 0);
     for (let k = 0; k < 4; k++) {
-      const angle = k / 4 * Math.PI * 2 + noise2(b.id + k * 4) * 0.7;
+      const angle = k / 4 * Math.PI * 2 + noise2(b.id + k * 4 + mapSalt) * 0.7;
       const p = { x: b.x + Math.cos(angle) * rx * 0.67, y: b.y + Math.sin(angle) * ry * 0.67 };
       if (Math.hypot(p.x - b.x, (p.y - b.y) * 1.6) < 65) continue;
       if (Math.abs(p.x - b.x) < 48 && p.y > b.y - 20) continue;
       if (!inside(p, points)) continue;
       if (g.links.some(([a, z]) => distanceToLine(p, g.bs[a], g.bs[z]) < 24)) continue;
-      scenery.push({ ...p, scale: 0.65 + noise2(k * 19 + b.id) * 0.7, type: k === 3 ? "ruin" : k % 2 ? "rock" : "pine", seed: b.id * 13 + k, color: theme.tree });
+      scenery.push({ ...p, scale: 0.65 + noise2(k * 19 + b.id + mapSalt) * 0.7, type: k === 3 ? "ruin" : k % 2 ? "rock" : "pine", seed: b.id * 13 + k, color: theme.tree });
     }
-    const hillCount = rx > 120 ? noise2(b.id * 41 + 5) > 0.45 ? 2 : 1 : noise2(b.id * 41 + 5) > 0.6 ? 1 : 0;
+    const hillCount = rx > 120 ? noise2(b.id * 41 + 5 + mapSalt) > 0.45 ? 2 : 1 : noise2(b.id * 41 + 5 + mapSalt) > 0.6 ? 1 : 0;
     for (let k = 0; k < hillCount; k++) {
-      const angle = noise2(b.id * 53 + k * 7) * Math.PI * 2;
-      const reach = 0.34 + noise2(b.id * 61 + k * 3) * 0.32;
+      const angle = noise2(b.id * 53 + k * 7 + mapSalt) * Math.PI * 2;
+      const reach = 0.34 + noise2(b.id * 61 + k * 3 + mapSalt) * 0.32;
       const p = { x: b.x + Math.cos(angle) * rx * reach, y: b.y + 10 + Math.sin(angle) * ry * reach };
-      const r = 16 + noise2(b.id * 67 + k * 11) * 20;
-      const h = 8 + noise2(b.id * 71 + k * 13) * 13;
+      const r = 16 + noise2(b.id * 67 + k * 11 + mapSalt) * 20;
+      const h = 8 + noise2(b.id * 71 + k * 13 + mapSalt) * 13;
       if (!inside(p, points)) continue;
       if (Math.hypot(p.x - b.x, p.y - b.y) < 62) continue;
       if (g.links.some(([a, z]) => distanceToLine(p, g.bs[a], g.bs[z]) < 42)) continue;
@@ -4646,7 +4845,10 @@ function command(canvas, action, value = 0) {
     }
     s.settings.customMap = config;
     saveMapSettings(config);
-    newGame(s, LEVELS.length, false, createRandomLevel(config));
+    newGame(s, LEVELS.length, false, createRandomLevel({ ...config, minDistance: s.settings.minCastleDistance }));
+    sfx.start();
+  } else if (action === "restart") {
+    newGame(s, g.i, false, g.i >= LEVELS.length ? g.L : void 0);
     sfx.start();
   } else if (action === "start" && typeof value === "number" && value >= 0 && value < s.settings.unlockedLevel) {
     newGame(s, value, false);

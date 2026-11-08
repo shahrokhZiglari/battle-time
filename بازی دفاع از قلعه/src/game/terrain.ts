@@ -155,7 +155,7 @@ function placeVessels(g: Game, ships: number, boats: number, shores: Point[][]):
     const drift = cruise ? (kind === "ship" ? 20 : 13) : 0;
     // شناورِ در حرکت موقعِ جای‌گذاری، «حاشیهٔ امن + کلِ شعاعِ مسیر» را رعایت
     // می‌کند؛ پس در تمامِ مسیر هم هرگز به ساحل یا پل نمی‌رسد.
-    const keep = clear + drift;
+    const keep = clear + drift + 4;
     for (let guard = 0; guard < 260; guard++) {
       const x = margin + Math.random() * (g.worldWidth - margin * 2);
       const y = margin + Math.random() * (g.worldHeight - margin * 2);
@@ -375,27 +375,27 @@ export function landscapeFor(g: Game): Landscape {
   if (known?.buildings === g.bs && known.links === g.links) return known.landscape;
   const themeIndex = g.demo ? 0 : Math.abs(g.L.theme ?? Math.floor(g.i / 10)) % THEMES.length;
   const theme = THEMES[themeIndex];
+  const mapSalt = ((g.L.seed ?? 0) % 9973) * 0.37;
   const scenery: Scenery[] = [];
   const hills: Hill[] = [];
   const vessels: Vessel[] = [];
   // کدام جزیره‌ها خلیج می‌گیرند؟ (خلیج = آب در دلِ خشکی، کنارِ ساحل)
   const lakeCount = Math.max(0, Math.min(MAX_LAKES, g.L.lakes ?? 0));
-  const bayIslands = new Set<number>();
-  if (lakeCount > 0 && g.bs.length > 1) {
-    const order = g.bs.map((b) => b.id);
+  const bayOrder = g.bs.map((b) => b.id);
+  if (lakeCount > 0 && bayOrder.length > 1) {
     // بر زدنِ با-seed تا خلیج‌ها هر بار روی جزیره‌های تازه بیفتند
-    for (let i = order.length - 1; i > 0; i--) {
-      const j = Math.floor(noise(g.i * 97 + i * 13 + 5) * (i + 1));
-      [order[i], order[j]] = [order[j], order[i]];
+    for (let i = bayOrder.length - 1; i > 0; i--) {
+      const j = Math.floor(noise(g.i * 97 + i * 13 + 5 + mapSalt) * (i + 1));
+      [bayOrder[i], bayOrder[j]] = [bayOrder[j], bayOrder[i]];
     }
-    order.slice(0, Math.min(lakeCount, order.length)).forEach((id) => bayIslands.add(id));
   }
-  const islands = g.bs.map((b) => {
+  const basePolys = new Map<number, { b: Game["bs"][number]; rx: number; ry: number; points: Point[] }>();
+  for (const b of g.bs) {
     const nearest = Math.min(...g.bs.filter((q) => q !== b).map((q) => Math.hypot(q.x - b.x, (q.y - b.y) * 1.15)));
     const rx = Math.max(70, Math.min(190, nearest * .56 + 28));
     const ry = rx * .72;
-    let points: Point[] = ring(b.x, b.y + 8, rx, ry, 10, .16 + noise(b.id * 5 + g.i) * .25)
-      .map((p, i) => ({ x: b.x + (p.x - b.x) * (.88 + noise(i * 7 + b.id * 13) * .17), y: b.y + (p.y - b.y) * (.88 + noise(i * 9 + b.id * 3) * .17) }));
+    let points: Point[] = ring(b.x, b.y + 8, rx, ry, 10, .16 + noise(b.id * 5 + g.i + mapSalt) * .25)
+      .map((p, i) => ({ x: b.x + (p.x - b.x) * (.88 + noise(i * 7 + b.id * 13 + mapSalt) * .17), y: b.y + (p.y - b.y) * (.88 + noise(i * 9 + b.id * 3 + mapSalt) * .17) }));
     // Voronoi clipping leaves readable water channels between nearby platforms.
     for (const other of g.bs) {
       if (other === b) continue;
@@ -403,59 +403,74 @@ export function landscapeFor(g: Game): Landscape {
       points = clip(points, nx, ny, nx * (b.x + other.x) / 2 + ny * (b.y + other.y) / 2);
     }
     points = points.map((p) => ({ x: b.x + (p.x - b.x) * .9, y: b.y + (p.y - b.y) * .9 }));
-    // خلیج: یک بریدگیِ نرم در ساحل که آبِ دریا در آن دیده می‌شود.
-    if (bayIslands.has(b.id)) {
-      const center = { x: b.x, y: b.y + 4 };
-      let bestVertex = -1;
-      let bestScore = -Infinity;
-      for (let i = 0; i < points.length; i++) {
-        const v = points[i];
-        const clearance = Math.hypot(v.x - center.x, v.y - center.y);
-        if (clearance < 88) continue;
-        if (g.links.some(([ia, ib]) => distanceToLine(v, g.bs[ia], g.bs[ib]) < 62)) continue;
-        if (!bayCandidate(points, center, i, 34)) continue;
-        // رأسِ رو به دریا و دور از پل‌ها بهتر است
-        const openness = Math.min(...g.bs.filter((q) => q !== b).map((q) => Math.hypot(q.x - v.x, (q.y - v.y) * 1.2)));
-        const score = Math.min(clearance, 190) * .35 + Math.min(openness, 220) * .65;
-        if (score > bestScore) { bestScore = score; bestVertex = i; }
-      }
-      if (bestVertex >= 0) {
-        const v = points[bestVertex];
-        const reach = Math.hypot(v.x - center.x, v.y - center.y);
-        // هر چه جزیره بزرگ‌تر، خلیج عمیق‌تر؛ ولی هرگز به قلعه یا پل نرسد.
-        const clearance = Math.min(...g.links.flatMap(([ia, ib]) => {
-          const A = g.bs[ia], B = g.bs[ib];
-          const dx = B.x - A.x, dy = B.y - A.y;
-          const len2 = dx * dx + dy * dy || 1;
-          const t = Math.max(0, Math.min(1, ((v.x - A.x) * dx + (v.y - A.y) * dy) / len2));
-          return [Math.hypot(v.x - A.x - t * dx, v.y - A.y - t * dy)];
-        }).concat([999]));
-        const carve = Math.max(30, Math.min(76, Math.min(reach - 86, clearance - 20)));
-        const carved = carveBay(points, center, bestVertex, carve);
-        if (carved.length >= 6) {
-          points = carved;
-        }
+    // حذف یال‌های ریزِ ناشی از برش ورونوی تا چندضلعی تمیز و کم‌رأس بماند
+    if (points.length > 12) {
+      points = points.filter((p, i) => {
+        const next = points[(i + 1) % points.length];
+        return Math.hypot(p.x - next.x, p.y - next.y) >= 12;
+      });
+    }
+    basePolys.set(b.id, { b, rx, ry, points });
+  }
+  // کندنِ خلیج تا سقفِ lakeCount روی جزیره‌هایی که ساحلِ آزادِ مناسب دارند
+  let baysCarved = 0;
+  for (const id of bayOrder) {
+    if (baysCarved >= lakeCount) break;
+    const entry = basePolys.get(id);
+    if (!entry) continue;
+    const { b, points } = entry;
+    const center = { x: b.x, y: b.y + 4 };
+    let bestVertex = -1;
+    let bestScore = -Infinity;
+    for (let i = 0; i < points.length; i++) {
+      const v = points[i];
+      const clearance = Math.hypot(v.x - center.x, v.y - center.y);
+      if (clearance < 84) continue;
+      if (g.links.some(([ia, ib]) => distanceToLine(v, g.bs[ia], g.bs[ib]) < 62)) continue;
+      if (!bayCandidate(points, center, i, 32)) continue;
+      const openness = Math.min(...g.bs.filter((q) => q !== b).map((q) => Math.hypot(q.x - v.x, (q.y - v.y) * 1.2)));
+      const score = Math.min(clearance, 190) * .35 + Math.min(openness, 220) * .65;
+      if (score > bestScore) { bestScore = score; bestVertex = i; }
+    }
+    if (bestVertex >= 0) {
+      const v = points[bestVertex];
+      const reach = Math.hypot(v.x - center.x, v.y - center.y);
+      const clearance = Math.min(...g.links.flatMap(([ia, ib]) => {
+        const A = g.bs[ia], B = g.bs[ib];
+        const dx = B.x - A.x, dy = B.y - A.y;
+        const len2 = dx * dx + dy * dy || 1;
+        const t = Math.max(0, Math.min(1, ((v.x - A.x) * dx + (v.y - A.y) * dy) / len2));
+        return [Math.hypot(v.x - A.x - t * dx, v.y - A.y - t * dy)];
+      }).concat([999]));
+      const carve = Math.max(30, Math.min(76, Math.min(reach - 82, clearance - 20)));
+      const carved = carveBay(points, center, bestVertex, carve);
+      if (carved.length >= 6) {
+        entry.points = carved;
+        baysCarved++;
       }
     }
+  }
+  const islands = g.bs.map((b) => {
+    const { rx, ry, points } = basePolys.get(b.id)!;
     // پستی و بلندی: ارتفاع سکوی هر جزیره با دیگران فرق می‌کند.
-    const depth = 15 + noise(b.id * 17 + 6) * 38 + (noise(b.id * 29 + 3) > .7 ? 14 : 0);
+    const depth = 15 + noise(b.id * 17 + 6 + mapSalt) * 38 + (noise(b.id * 29 + 3 + mapSalt) > .7 ? 14 : 0);
     for (let k = 0; k < 4; k++) {
-      const angle = (k / 4) * Math.PI * 2 + noise(b.id + k * 4) * .7;
+      const angle = (k / 4) * Math.PI * 2 + noise(b.id + k * 4 + mapSalt) * .7;
       const p = { x: b.x + Math.cos(angle) * rx * .67, y: b.y + Math.sin(angle) * ry * .67 };
       if (Math.hypot(p.x - b.x, (p.y - b.y) * 1.6) < 65) continue;
       if (Math.abs(p.x - b.x) < 48 && p.y > b.y - 20) continue;
       if (!inside(p, points)) continue;
       if (g.links.some(([a, z]) => distanceToLine(p, g.bs[a], g.bs[z]) < 24)) continue;
-      scenery.push({ ...p, scale: .65 + noise(k * 19 + b.id) * .7, type: k === 3 ? "ruin" : k % 2 ? "rock" : "pine", seed: b.id * 13 + k, color: theme.tree });
+      scenery.push({ ...p, scale: .65 + noise(k * 19 + b.id + mapSalt) * .7, type: k === 3 ? "ruin" : k % 2 ? "rock" : "pine", seed: b.id * 13 + k, color: theme.tree });
     }
     // تپه‌های ملایم روی سطح جزیره (پستی و بلندیِ چشم‌نواز، بی‌مزاحمت برای بازی)
-    const hillCount = rx > 120 ? (noise(b.id * 41 + 5) > .45 ? 2 : 1) : noise(b.id * 41 + 5) > .6 ? 1 : 0;
+    const hillCount = rx > 120 ? (noise(b.id * 41 + 5 + mapSalt) > .45 ? 2 : 1) : noise(b.id * 41 + 5 + mapSalt) > .6 ? 1 : 0;
     for (let k = 0; k < hillCount; k++) {
-      const angle = noise(b.id * 53 + k * 7) * Math.PI * 2;
-      const reach = .34 + noise(b.id * 61 + k * 3) * .32;
+      const angle = noise(b.id * 53 + k * 7 + mapSalt) * Math.PI * 2;
+      const reach = .34 + noise(b.id * 61 + k * 3 + mapSalt) * .32;
       const p = { x: b.x + Math.cos(angle) * rx * reach, y: b.y + 10 + Math.sin(angle) * ry * reach };
-      const r = 16 + noise(b.id * 67 + k * 11) * 20;
-      const h = 8 + noise(b.id * 71 + k * 13) * 13;
+      const r = 16 + noise(b.id * 67 + k * 11 + mapSalt) * 20;
+      const h = 8 + noise(b.id * 71 + k * 13 + mapSalt) * 13;
       if (!inside(p, points)) continue;
       if (Math.hypot(p.x - b.x, p.y - b.y) < 62) continue;
       if (g.links.some(([a, z]) => distanceToLine(p, g.bs[a], g.bs[z]) < 42)) continue;
