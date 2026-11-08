@@ -206,14 +206,231 @@ var LEVELS = [
 ];
 var defOf = (b) => CFG.def[b.type];
 
+// src/game/custom-sfx.ts
+var DB_NAME = "bt_custom_sfx_v1";
+var STORE_NAME = "clips";
+var MAX_AUDIO_BYTES = 12 * 1024 * 1024;
+var records = /* @__PURE__ */ new Map();
+var listeners = /* @__PURE__ */ new Set();
+var initialized = false;
+function notify(key) {
+  for (const fn of listeners) {
+    try {
+      fn(key);
+    } catch {
+    }
+  }
+}
+function onCustomSfxChange(fn) {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
+function openDb() {
+  if (typeof indexedDB === "undefined") return Promise.resolve(null);
+  return new Promise((resolve) => {
+    try {
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(STORE_NAME)) {
+          db.createObjectStore(STORE_NAME, { keyPath: "key" });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+async function dbPut(entry) {
+  const db = await openDb();
+  if (!db) return;
+  await new Promise((resolve) => {
+    try {
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      tx.objectStore(STORE_NAME).put(entry);
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => {
+        db.close();
+        resolve();
+      };
+    } catch {
+      db.close();
+      resolve();
+    }
+  });
+}
+async function dbDelete(key) {
+  const db = await openDb();
+  if (!db) return;
+  await new Promise((resolve) => {
+    try {
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      const store = tx.objectStore(STORE_NAME);
+      if (key) store.delete(key);
+      else store.clear();
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => {
+        db.close();
+        resolve();
+      };
+    } catch {
+      db.close();
+      resolve();
+    }
+  });
+}
+async function decodeWithContext(ctx2, bytes) {
+  if (!ctx2 || typeof ctx2.decodeAudioData !== "function") return null;
+  try {
+    return await ctx2.decodeAudioData(bytes.slice(0));
+  } catch {
+    return null;
+  }
+}
+async function initCustomSfx(getCtx) {
+  if (initialized) return;
+  initialized = true;
+  const db = await openDb();
+  if (!db) return;
+  const rows = await new Promise((resolve) => {
+    try {
+      const tx = db.transaction(STORE_NAME, "readonly");
+      const req = tx.objectStore(STORE_NAME).getAll();
+      req.onsuccess = () => {
+        db.close();
+        resolve(Array.isArray(req.result) ? req.result : []);
+      };
+      req.onerror = () => {
+        db.close();
+        resolve([]);
+      };
+    } catch {
+      db.close();
+      resolve([]);
+    }
+  });
+  for (const row of rows) {
+    if (!row?.key || !(row.bytes instanceof ArrayBuffer)) continue;
+    records.set(row.key, {
+      key: row.key,
+      name: String(row.name || row.key),
+      mime: String(row.mime || "audio/*"),
+      bytes: row.bytes,
+      buffer: null
+    });
+  }
+  if (rows.length > 0) {
+    notify();
+    const ctx2 = getCtx();
+    if (ctx2) {
+      for (const rec of records.values()) {
+        if (!rec.buffer) rec.buffer = await decodeWithContext(ctx2, rec.bytes);
+      }
+      notify();
+    }
+  }
+}
+function hasCustomSfx(key) {
+  return records.has(key);
+}
+function getCustomSfxMeta() {
+  const out = {};
+  for (const [k, v] of records.entries()) out[k] = v.name;
+  return out;
+}
+async function ensureCustomSfxBuffer(key, ctx2) {
+  const rec = records.get(key);
+  if (!rec) return null;
+  if (rec.buffer) return rec.buffer;
+  rec.buffer = await decodeWithContext(ctx2, rec.bytes);
+  return rec.buffer;
+}
+function getCachedCustomSfxBuffer(key) {
+  return records.get(key)?.buffer ?? null;
+}
+async function setCustomSfxBytes(key, name, mime, bytes, ctx2) {
+  if (!bytes || bytes.byteLength === 0) {
+    return { ok: false, error: "فایل صوتی انتخاب‌شده خالی است." };
+  }
+  if (bytes.byteLength > MAX_AUDIO_BYTES) {
+    return { ok: false, error: "حجم فایل صوتی نباید بیشتر از ۱۲ مگابایت باشد." };
+  }
+  const buffer = await decodeWithContext(ctx2, bytes);
+  if (ctx2 && typeof ctx2.decodeAudioData === "function" && !buffer) {
+    return { ok: false, error: "فرمت این فایل صوتی توسط مرورگر پشتیبانی نمی‌شود." };
+  }
+  const cleanName = (name || key).trim().slice(0, 80);
+  records.set(key, { key, name: cleanName, mime: mime || "audio/*", bytes: bytes.slice(0), buffer });
+  await dbPut({ key, name: cleanName, mime: mime || "audio/*", bytes: bytes.slice(0) });
+  notify(key);
+  return { ok: true, name: cleanName };
+}
+async function clearCustomSfx(key) {
+  if (!records.has(key)) return;
+  records.delete(key);
+  await dbDelete(key);
+  notify(key);
+}
+async function clearAllCustomSfx() {
+  if (records.size === 0) return;
+  records.clear();
+  await dbDelete();
+  notify();
+}
+function pickCustomSfxFile(key, getCtx) {
+  if (typeof document === "undefined") {
+    return Promise.resolve({ ok: false, error: "محیط مرورگر در دسترس نیست." });
+  }
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "audio/*,.mp3,.wav,.ogg,.m4a,.aac,.webm,.flac";
+    input.style.display = "none";
+    let settled = false;
+    const finish = (res) => {
+      if (settled) return;
+      settled = true;
+      input.remove();
+      resolve(res);
+    };
+    input.addEventListener("cancel", () => finish({ ok: false, cancelled: true }));
+    input.addEventListener("change", async () => {
+      const file = input.files?.[0];
+      if (!file) {
+        finish({ ok: false, cancelled: true });
+        return;
+      }
+      try {
+        const bytes = await file.arrayBuffer();
+        const res = await setCustomSfxBytes(key, file.name, file.type || "audio/*", bytes, getCtx());
+        finish(res);
+      } catch {
+        finish({ ok: false, error: "خواندن فایل صوتی با خطا روبه‌رو شد." });
+      }
+    });
+    document.body.appendChild(input);
+    input.click();
+  });
+}
+
 // src/game/nature-audio.ts
 var ac = null;
 var master = null;
 var ambientGain = null;
+var ambientSource = null;
 var ambientTimer = null;
 var ambientOn = false;
 var marchOn = false;
 var marchGain = null;
+var marchSource = null;
 var marchTimer = null;
 var noiseBuffer = null;
 var layerVolume = { ambient: 1, march: 1 };
@@ -278,12 +495,35 @@ function setNatureVolume(kind, value) {
   if (kind === "ambient" && ambientGain) ambientGain.gain.setTargetAtTime(0.9 * v, a.currentTime, 0.15);
   if (kind === "march" && marchGain) marchGain.gain.setTargetAtTime(0.85 * v, a.currentTime, 0.15);
 }
+function startCustomLoop(kind, a, gainNode) {
+  const playBuf = (buf) => {
+    if (!buf) return;
+    if (kind === "ambient" && (!ambientOn || ambientGain !== gainNode)) return;
+    if (kind === "march" && (!marchOn || marchGain !== gainNode)) return;
+    const src = a.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    src.connect(gainNode);
+    src.start();
+    if (kind === "ambient") ambientSource = src;
+    else marchSource = src;
+  };
+  const cached = getCachedCustomSfxBuffer(kind);
+  if (cached) playBuf(cached);
+  else void ensureCustomSfxBuffer(kind, a).then(playBuf);
+}
 function startAmbient(a) {
-  if (ambientTimer !== null) return;
+  if (ambientGain !== null) return;
   ambientGain = a.createGain();
-  ambientGain.gain.value = 0;
+  ambientGain.gain.value = 0.9 * layerVolume.ambient;
   ambientGain.connect(master);
-  windLayer(a, ambientGain, 0.05 * layerVolume.ambient, 0);
+  if (hasCustomSfx("ambient")) {
+    startCustomLoop("ambient", a, ambientGain);
+    return;
+  }
+  ambientGain.gain.value = 0;
+  const wind = windLayer(a, ambientGain, 0.05 * layerVolume.ambient, 0);
+  ambientSource = wind.source;
   const chirp = () => {
     if (!ambientOn || !ambientGain) return;
     const now = a.currentTime;
@@ -310,25 +550,37 @@ function stopAmbient() {
     clearTimeout(ambientTimer);
     ambientTimer = null;
   }
+  if (ambientSource) {
+    try {
+      ambientSource.stop();
+    } catch {
+    }
+    ambientSource = null;
+  }
   if (ambientGain && ac) {
     const g = ambientGain;
     g.gain.cancelScheduledValues(ac.currentTime);
-    g.gain.linearRampToValueAtTime(0, ac.currentTime + 0.6);
+    g.gain.linearRampToValueAtTime(0, ac.currentTime + 0.35);
     window.setTimeout(() => {
       try {
         g.disconnect();
       } catch {
       }
-    }, 800);
+    }, 450);
   }
   ambientGain = null;
   ambientOn = false;
 }
 function startMarch(a) {
-  if (marchTimer !== null) return;
+  if (marchGain !== null) return;
   marchGain = a.createGain();
-  marchGain.gain.value = 0;
+  marchGain.gain.value = 0.85 * layerVolume.march;
   marchGain.connect(master);
+  if (hasCustomSfx("march")) {
+    startCustomLoop("march", a, marchGain);
+    return;
+  }
+  marchGain.gain.value = 0;
   const step = () => {
     if (!marchOn || !marchGain) return;
     const now = a.currentTime;
@@ -365,20 +617,127 @@ function stopMarch() {
     clearTimeout(marchTimer);
     marchTimer = null;
   }
+  if (marchSource) {
+    try {
+      marchSource.stop();
+    } catch {
+    }
+    marchSource = null;
+  }
   if (marchGain && ac) {
     const g = marchGain;
     g.gain.cancelScheduledValues(ac.currentTime);
-    g.gain.linearRampToValueAtTime(0, ac.currentTime + 0.4);
+    g.gain.linearRampToValueAtTime(0, ac.currentTime + 0.3);
     window.setTimeout(() => {
       try {
         g.disconnect();
       } catch {
       }
-    }, 600);
+    }, 400);
   }
   marchGain = null;
   marchOn = false;
 }
+function previewNatureSample(kind, level, onDone) {
+  const a = audio();
+  if (!a || !master) {
+    onDone?.();
+    return () => {
+    };
+  }
+  const bus = a.createGain();
+  bus.gain.value = Math.max(0.05, Math.min(1, level));
+  bus.connect(a.destination);
+  const timers = [];
+  const sources = [];
+  let closed = false;
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    for (const t of timers) clearTimeout(t);
+    for (const s of sources) {
+      try {
+        s.stop();
+      } catch {
+      }
+    }
+    try {
+      bus.disconnect();
+    } catch {
+    }
+    onDone?.();
+  };
+  if (kind === "ambient") {
+    const w = windLayer(a, bus, 0.08, 0);
+    sources.push(w.source);
+    for (const delay of [120, 920]) {
+      timers.push(setTimeout(() => {
+        if (closed) return;
+        const now = a.currentTime;
+        const osc = a.createOscillator();
+        const g = a.createGain();
+        osc.type = "sine";
+        const base = delay < 500 ? 1680 : 1960;
+        osc.frequency.setValueAtTime(base, now);
+        osc.frequency.exponentialRampToValueAtTime(base * 1.45, now + 0.08);
+        osc.frequency.exponentialRampToValueAtTime(base * 0.88, now + 0.18);
+        g.gain.setValueAtTime(1e-4, now);
+        g.gain.linearRampToValueAtTime(0.06, now + 0.02);
+        g.gain.exponentialRampToValueAtTime(8e-4, now + 0.32);
+        osc.connect(g).connect(bus);
+        osc.start(now);
+        osc.stop(now + 0.35);
+      }, delay));
+    }
+    timers.push(setTimeout(cleanup, 2100));
+  } else {
+    for (let i = 0; i < 4; i++) {
+      timers.push(setTimeout(() => {
+        if (closed) return;
+        const now = a.currentTime;
+        const thud = a.createOscillator();
+        const tg = a.createGain();
+        thud.type = "sine";
+        thud.frequency.setValueAtTime(125, now);
+        thud.frequency.exponentialRampToValueAtTime(48, now + 0.1);
+        tg.gain.setValueAtTime(1e-4, now);
+        tg.gain.linearRampToValueAtTime(0.16, now + 8e-3);
+        tg.gain.exponentialRampToValueAtTime(8e-4, now + 0.13);
+        thud.connect(tg).connect(bus);
+        thud.start(now);
+        thud.stop(now + 0.15);
+        const src = a.createBufferSource();
+        src.buffer = noise(a);
+        const filter = a.createBiquadFilter();
+        filter.type = "bandpass";
+        filter.frequency.value = 1500;
+        const ng = a.createGain();
+        ng.gain.setValueAtTime(1e-4, now);
+        ng.gain.linearRampToValueAtTime(0.06, now + 0.01);
+        ng.gain.exponentialRampToValueAtTime(8e-4, now + 0.12);
+        src.connect(filter).connect(ng).connect(bus);
+        src.start(now);
+        src.stop(now + 0.14);
+      }, i * 310));
+    }
+    timers.push(setTimeout(cleanup, 1450));
+  }
+  return cleanup;
+}
+onCustomSfxChange((changedKey) => {
+  if ((!changedKey || changedKey === "ambient") && ambientOn) {
+    const a = audio();
+    stopAmbient();
+    ambientOn = true;
+    if (a) startAmbient(a);
+  }
+  if ((!changedKey || changedKey === "march") && marchOn) {
+    const a = audio();
+    stopMarch();
+    marchOn = true;
+    if (a) startMarch(a);
+  }
+});
 function stopAllNature() {
   stopAmbient();
   stopMarch();
@@ -419,7 +778,10 @@ var ac2 = null;
 var enabled = true;
 var setSound = (v) => {
   enabled = v;
-  if (!v) stopAllNature();
+  if (!v) {
+    stopAllNature();
+    stopSfxPreview();
+  }
 };
 function ctx() {
   try {
@@ -432,6 +794,59 @@ function ctx() {
   } catch {
     return null;
   }
+}
+if (typeof window !== "undefined" && typeof indexedDB !== "undefined") {
+  void initCustomSfx(ctx);
+}
+function playCustomClip(key, level, onEnded) {
+  if (level <= 5e-4) return null;
+  const a = ctx();
+  if (!a) return null;
+  let stopped = false;
+  let activeSrc = null;
+  let timer = null;
+  const gainNode = a.createGain();
+  gainNode.gain.value = 0.65 * level;
+  gainNode.connect(a.destination);
+  const cleanup = () => {
+    if (stopped) return;
+    stopped = true;
+    if (timer) clearTimeout(timer);
+    if (activeSrc) {
+      try {
+        activeSrc.stop();
+      } catch {
+      }
+      activeSrc = null;
+    }
+    try {
+      gainNode.disconnect();
+    } catch {
+    }
+    onEnded?.();
+  };
+  const startBuffer = (buf) => {
+    if (stopped || !buf) {
+      if (!buf) cleanup();
+      return;
+    }
+    try {
+      const src = a.createBufferSource();
+      src.buffer = buf;
+      src.connect(gainNode);
+      activeSrc = src;
+      src.onended = cleanup;
+      src.start();
+      const durMs = Math.max(120, Math.min(15e3, (buf.duration ?? 2) * 1e3 + 80));
+      timer = setTimeout(cleanup, durMs);
+    } catch {
+      cleanup();
+    }
+  };
+  const cached = getCachedCustomSfxBuffer(key);
+  if (cached) startBuffer(cached);
+  else void ensureCustomSfxBuffer(key, a).then(startBuffer);
+  return cleanup;
 }
 function beep(f, d = 0.1, t = "square", v = 0.04, key) {
   if (!enabled) return;
@@ -477,11 +892,15 @@ function sweep(f0, f1, d = 0.18, t = "triangle", v = 0.05, key) {
 var jingle = (a, key) => a.forEach((f, i) => setTimeout(() => beep(f, 0.2, "triangle", 0.06, key), i * 125));
 function captureFanfare() {
   if (!enabled) return;
+  const level = vol("capture");
+  if (level <= 1e-3) return;
+  if (hasCustomSfx("capture")) {
+    playCustomClip("capture", level);
+    return;
+  }
   const a = ctx();
   if (!a) return;
   try {
-    const level = vol("capture");
-    if (level <= 1e-3) return;
     const now = a.currentTime;
     const bus = a.createGain();
     bus.gain.setValueAtTime(0.42 * level, now);
@@ -556,21 +975,124 @@ function setNatureLayers(ambient, march) {
   setNatureSound("ambient", ambient);
   setNatureSound("march", march);
 }
+function runDiscrete(key, fallback) {
+  if (!enabled) return;
+  const level = vol(key);
+  if (level <= 1e-3) return;
+  if (hasCustomSfx(key)) {
+    playCustomClip(key, level);
+    return;
+  }
+  fallback();
+}
 var sfx = {
-  select: () => beep(560, 0.05, "triangle", 0.045, "select"),
-  deselect: () => beep(330, 0.05, "sine", 0.04, "deselect"),
-  send: () => sweep(420, 720, 0.16, "triangle", 0.05, "send"),
+  select: () => runDiscrete("select", () => beep(560, 0.05, "triangle", 0.045, "select")),
+  deselect: () => runDiscrete("deselect", () => beep(330, 0.05, "sine", 0.04, "deselect")),
+  send: () => runDiscrete("send", () => sweep(420, 720, 0.16, "triangle", 0.05, "send")),
   capture: () => captureFanfare(),
-  lose: () => beep(170, 0.32, "sawtooth", 0.05, "lose"),
-  repel: () => beep(220, 0.1, "sawtooth", 0.04, "repel"),
-  upgrade: () => beep(680, 0.16, "triangle", 0.05, "upgrade"),
-  shot: () => beep(920, 0.045, "square", 0.018, "shot"),
-  clash: () => beep(300, 0.06, "sawtooth", 0.028, "clash"),
-  win: () => jingle([523, 659, 784, 1047], "win"),
-  defeat: () => jingle([392, 330, 262, 196], "defeat"),
-  start: () => jingle([392, 523], "start"),
-  hover: () => beep(760, 0.03, "sine", 0.02, "hover")
+  lose: () => runDiscrete("lose", () => beep(170, 0.32, "sawtooth", 0.05, "lose")),
+  repel: () => runDiscrete("repel", () => beep(220, 0.1, "sawtooth", 0.04, "repel")),
+  upgrade: () => runDiscrete("upgrade", () => beep(680, 0.16, "triangle", 0.05, "upgrade")),
+  shot: () => runDiscrete("shot", () => beep(920, 0.045, "square", 0.018, "shot")),
+  clash: () => runDiscrete("clash", () => beep(300, 0.06, "sawtooth", 0.028, "clash")),
+  win: () => runDiscrete("win", () => jingle([523, 659, 784, 1047], "win")),
+  defeat: () => runDiscrete("defeat", () => jingle([392, 330, 262, 196], "defeat")),
+  start: () => runDiscrete("start", () => jingle([392, 523], "start")),
+  hover: () => runDiscrete("hover", () => beep(760, 0.03, "sine", 0.02, "hover"))
 };
+var activePreview = null;
+var previewListeners = /* @__PURE__ */ new Set();
+function emitPreview(active) {
+  for (const fn of previewListeners) {
+    try {
+      fn(active);
+    } catch {
+    }
+  }
+}
+function stopSfxPreview() {
+  if (!activePreview) return;
+  const cur = activePreview;
+  activePreview = null;
+  cur.stop();
+  emitPreview(null);
+}
+function previewSfx(key, overrideLevel) {
+  if (activePreview?.key === key) {
+    stopSfxPreview();
+    return false;
+  }
+  stopSfxPreview();
+  const rawLevel = overrideLevel !== void 0 ? overrideLevel : vol(key);
+  const level = rawLevel > 5e-3 ? Math.max(0.05, Math.min(1, rawLevel)) : DEFAULT_SFX_VOLUMES[key];
+  if (hasCustomSfx(key)) {
+    const stopClip = playCustomClip(key, level, () => {
+      if (activePreview?.key === key) {
+        activePreview = null;
+        emitPreview(null);
+      }
+    });
+    if (stopClip) {
+      activePreview = { key, stop: stopClip };
+      emitPreview(key);
+      return true;
+    }
+  }
+  if (key === "ambient" || key === "march") {
+    const stopSample = previewNatureSample(key, level, () => {
+      if (activePreview?.key === key) {
+        activePreview = null;
+        emitPreview(null);
+      }
+    });
+    activePreview = { key, stop: stopSample };
+    emitPreview(key);
+    return true;
+  }
+  const prevEnabled = enabled;
+  const prevVol = volumes[key];
+  enabled = true;
+  volumes[key] = level;
+  try {
+    sfx[key]();
+  } finally {
+    const holdMs = key === "win" || key === "defeat" ? 560 : key === "start" || key === "capture" ? 650 : 280;
+    const timer = setTimeout(() => {
+      enabled = prevEnabled;
+      volumes[key] = prevVol;
+      if (activePreview?.key === key) {
+        activePreview = null;
+        emitPreview(null);
+      }
+    }, holdMs);
+    activePreview = {
+      key,
+      stop: () => {
+        clearTimeout(timer);
+        enabled = prevEnabled;
+        volumes[key] = prevVol;
+      }
+    };
+    emitPreview(key);
+  }
+  return true;
+}
+async function uploadCustomSfx(key) {
+  await initCustomSfx(ctx);
+  const res = await pickCustomSfxFile(key, ctx);
+  if (res.ok) {
+    previewSfx(key);
+  }
+  return res;
+}
+async function resetCustomSfx(key) {
+  if (activePreview?.key === key) stopSfxPreview();
+  await clearCustomSfx(key);
+}
+async function resetAllCustomSfx() {
+  stopSfxPreview();
+  await clearAllCustomSfx();
+}
 
 // src/game/troops.ts
 var EPSILON = 1e-8;
@@ -4592,6 +5114,27 @@ function copySettingsText(text) {
 function downloadSettingsFile(text, filename = SETTINGS_FILE_NAME) {
   return downloadJsonFile(text, filename);
 }
+function getCustomSoundsMeta() {
+  return getCustomSfxMeta();
+}
+function previewSoundEffect(key, level = 1) {
+  if (!SFX_KEYS.includes(key)) return false;
+  return previewSfx(key, Number.isFinite(Number(level)) ? Number(level) : 1);
+}
+function stopSoundPreview() {
+  stopSfxPreview();
+}
+async function uploadCustomSound(key) {
+  if (!SFX_KEYS.includes(key)) return { ok: false, error: "کلید افکت نامعتبر است." };
+  return uploadCustomSfx(key);
+}
+async function resetCustomSound(key) {
+  if (!SFX_KEYS.includes(key)) return;
+  await resetCustomSfx(key);
+}
+async function resetAllCustomSounds() {
+  await resetAllCustomSfx();
+}
 function snapshot(s) {
   const g = s.game;
   const selected = g.ptr?.draft.length ? g.ptr.draft : g.sels;
@@ -4628,7 +5171,7 @@ function snapshot(s) {
     message: performance.now() < s.messageUntil ? s.message : ""
   };
 }
-function notify(s, now, force = false) {
+function notify2(s, now, force = false) {
   if (s.stopped || s.game.demo || s.inFlight || !force && now - s.lastSent < 500) return;
   s.inFlight = true;
   s.lastSent = now;
@@ -4678,7 +5221,7 @@ function newGame(s, index, demo, levelOverride) {
   };
   s.game.onFinish = (win) => {
     s.win = win;
-    notify(s, performance.now(), true);
+    notify2(s, performance.now(), true);
   };
   s.game.onDemoReset = () => {
     s.resetDemo = true;
@@ -4787,7 +5330,7 @@ function initialize(canvas, callback, input) {
     const rect = canvas.getBoundingClientRect();
     const step = event.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
     s.game.zoomAt(step, event.clientX - rect.left, event.clientY - rect.top, canvas.clientWidth, canvas.clientHeight);
-    notify(s, performance.now(), true);
+    notify2(s, performance.now(), true);
   }, { signal, passive: false });
   canvas.addEventListener("contextmenu", (event) => event.preventDefault(), { signal });
   canvas.addEventListener("keydown", (event) => {
@@ -4796,7 +5339,7 @@ function initialize(canvas, callback, input) {
       event.preventDefault();
       s.game.cancel();
       s.game.paused = !s.game.paused;
-      notify(s, performance.now(), true);
+      notify2(s, performance.now(), true);
     } else if (!s.game.paused) {
       if (event.code === "KeyA") {
         event.preventDefault();
@@ -4808,7 +5351,7 @@ function initialize(canvas, callback, input) {
     if (document.hidden && !s.game.demo && !s.game.over) {
       s.game.paused = true;
       s.game.cancel();
-      notify(s, performance.now(), true);
+      notify2(s, performance.now(), true);
     }
   }, { signal });
   window.addEventListener("resize", resize, { signal });
@@ -4829,7 +5372,7 @@ function initialize(canvas, callback, input) {
     else if (g.over) g.idle(dt * s.settings.speedMultiplier);
     if (g.ptr || g.hover) g.preview = g.computePreview();
     render(ctx2, g, now / 1e3, canvas.clientWidth, canvas.clientHeight, Math.min(2, devicePixelRatio || 1));
-    notify(s, now);
+    notify2(s, now);
     if (s.resetDemo) newGame(s, Math.floor(Math.random() * LEVELS.length), true);
     s.raf = requestAnimationFrame(frame);
   }
@@ -4903,11 +5446,17 @@ export {
   dispose,
   downloadSettingsFile,
   exportPortableSettings,
+  getCustomSoundsMeta,
   importPortableSettings,
   initialize,
   loadSettings,
+  previewSoundEffect,
+  resetAllCustomSounds,
+  resetCustomSound,
   saveGlobalSettings,
   saveMapSettings,
   saveSettings,
-  saveToBlazor
+  saveToBlazor,
+  stopSoundPreview,
+  uploadCustomSound
 };

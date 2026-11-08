@@ -46,19 +46,36 @@
                 <button type="button" class="cg-btn @(Draft.MarchSound ? "cg-gold" : "")" aria-pressed="@Draft.MarchSound" @onclick="() => Draft.MarchSound = !Draft.MarchSound">حرکت لشکر</button>
                 <button type="button" class="cg-btn @(Draft.SoundEnabled ? "cg-gold" : "")" aria-pressed="@Draft.SoundEnabled" @onclick="() => Draft.SoundEnabled = !Draft.SoundEnabled">صدا</button>
             </div>
-            <p class="cg-muted">هر صدا دکمهٔ − و + خودش را دارد. صفر یعنی خاموش. تغییر همان لحظه روی نبردِ در جریان هم اثر می‌گذارد.</p>
+            <p class="cg-muted">کنار هر صدا دکمهٔ پخش (▶) برای شنیدن جداگانه، دکمهٔ آپلود (⬆) برای جایگزینی با فایل صوتی دلخواه، و دکمهٔ − و + برای تنظیم بلندی قرار دارد.</p>
+            @if (!string.IsNullOrEmpty(SoundStatusMessage))
+            {
+                <p class="@(SoundStatusError ? "cg-foe" : "cg-ally")" role="@(SoundStatusError ? "alert" : "status")">@SoundStatusMessage</p>
+            }
             <div class="cg-volumes">
                 @foreach (var sound in SoundKeys)
                 {
+                    var hasCustom = CustomSounds.TryGetValue(sound.Key, out var customName) && !string.IsNullOrEmpty(customName);
                     <div class="cg-volume">
-                        <span>@sound.Value</span>
+                        <span class="@(hasCustom ? "cg-ally" : "")" title="@(hasCustom ? $"{sound.Value} · فایل سفارشی: {customName}" : sound.Value)">@(hasCustom ? $"{sound.Value} ★" : sound.Value)</span>
+                        <button type="button" class="cg-step cg-sfx-btn" aria-label="پخش صدای @sound.Value" title="پخش آزمایشی «@sound.Value»" @onclick="() => PreviewSoundAsync(sound.Key)">▶</button>
+                        <button type="button" class="cg-step cg-sfx-btn @(hasCustom ? "cg-sfx-custom" : "")" aria-label="آپلود صدای جدید برای @sound.Value" title="@(hasCustom ? $"تغییر فایل «{customName}»" : $"آپلود صدای جدید برای «{sound.Value}»")" @onclick="() => UploadSoundAsync(sound.Key)">⬆</button>
+                        @if (hasCustom)
+                        {
+                            <button type="button" class="cg-step cg-sfx-btn" aria-label="بازگردانی صدای پیش‌فرض @sound.Value" title="بازگشت به صدای پیش‌فرض «@sound.Value»" @onclick="() => ResetOneSoundAsync(sound.Key)">↺</button>
+                        }
                         <button type="button" class="cg-step" aria-label="کاهش @sound.Value" @onclick="() => Vol(sound.Key, -1)">−</button>
                         <b>@PercentOf(sound.Key)</b>
                         <button type="button" class="cg-step" aria-label="افزایش @sound.Value" @onclick="() => Vol(sound.Key, 1)">+</button>
                     </div>
                 }
             </div>
-            <button type="button" class="cg-btn" @onclick="ResetVolumes">همه ۱۰۰٪</button>
+            <div class="cg-choice-row" style="margin-top: 6px;">
+                <button type="button" class="cg-btn" @onclick="ResetVolumes">همه ۱۰۰٪</button>
+                @if (CustomSounds.Count > 0)
+                {
+                    <button type="button" class="cg-btn" @onclick="ResetAllCustomSoundsAsync">صداهای پیش‌فرض ↺</button>
+                }
+            </div>
         </fieldset>
         <fieldset>
             <legend>راه‌های نقشه</legend>
@@ -260,6 +277,87 @@
     private string TransferJson = "";
     private string? TransferMessage;
     private bool TransferError;
+    private Dictionary<string, string> CustomSounds = new(StringComparer.Ordinal);
+    private string? SoundStatusMessage;
+    private bool SoundStatusError;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || Module is null) return;
+        await RefreshCustomSoundsAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RefreshCustomSoundsAsync()
+    {
+        if (Module is null) return;
+        try
+        {
+            var meta = await Module.InvokeAsync<Dictionary<string, string>?>("getCustomSoundsMeta");
+            CustomSounds = meta ?? new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException) { }
+    }
+
+    private async Task PreviewSoundAsync(string key)
+    {
+        if (Module is null) return;
+        try { await Module.InvokeAsync<bool>("previewSoundEffect", key, Draft.VolumeOf(key)); }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException) { }
+    }
+
+    private async Task UploadSoundAsync(string key)
+    {
+        if (Module is null) return;
+        try
+        {
+            var res = await Module.InvokeAsync<CustomSoundUploadResult?>("uploadCustomSound", key);
+            if (res is null || res.Cancelled) return;
+            await RefreshCustomSoundsAsync();
+            if (res.Ok)
+            {
+                SoundStatusError = false;
+                SoundStatusMessage = $"صدای جدید «{res.Name}» ذخیره و پخش شد ✓";
+            }
+            else if (!string.IsNullOrEmpty(res.Error))
+            {
+                SoundStatusError = true;
+                SoundStatusMessage = res.Error;
+            }
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException)
+        {
+            SoundStatusError = true;
+            SoundStatusMessage = "بارگذاری فایل صوتی انجام نشد.";
+        }
+    }
+
+    private async Task ResetOneSoundAsync(string key)
+    {
+        if (Module is null) return;
+        try
+        {
+            await Module.InvokeVoidAsync("resetCustomSound", key);
+            await RefreshCustomSoundsAsync();
+            await Module.InvokeAsync<bool>("previewSoundEffect", key, Draft.VolumeOf(key));
+            SoundStatusError = false;
+            SoundStatusMessage = "صدای انتخابی به حالت پیش‌فرض برگشت.";
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException) { }
+    }
+
+    private async Task ResetAllCustomSoundsAsync()
+    {
+        if (Module is null) return;
+        try
+        {
+            await Module.InvokeVoidAsync("resetAllCustomSounds");
+            await RefreshCustomSoundsAsync();
+            SoundStatusError = false;
+            SoundStatusMessage = "همهٔ صداهای آپلودشده به حالت پیش‌فرض برگشتند.";
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException) { }
+    }
 
     private async Task CopySettingsAsync()
     {
@@ -401,7 +499,7 @@
     private void Vol(string key, int dir) => Draft.SetVolume(key, Round(Draft.VolumeOf(key) + dir * 0.1, 0, 1));
 
     /// <summary>بازگردانیِ تنظیمات به مقادیرِ پیش‌فرض بدون پاک کردنِ مراحل بازشده</summary>
-    private void ResetToDefaults()
+    private async Task ResetToDefaults()
     {
         var defaults = new CastleSettings
         {
@@ -410,6 +508,15 @@
             CustomMap = Draft.CustomMap.Copy(),
         };
         Draft = defaults;
+        if (Module is not null)
+        {
+            try
+            {
+                await Module.InvokeVoidAsync("resetAllCustomSounds");
+                await RefreshCustomSoundsAsync();
+            }
+            catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException) { }
+        }
         if (ShowTransferBox) TransferJson = CastleSettingsTransfer.Export(Draft);
     }
 

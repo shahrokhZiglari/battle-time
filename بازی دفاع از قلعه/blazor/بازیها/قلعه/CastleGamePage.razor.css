@@ -263,3 +263,12 @@
     border-color: #3ddc84;
     background: linear-gradient(180deg, rgba(61, 220, 132, .38), rgba(18, 133, 90, .52));
 }
+.castle-root ::deep .cg-sfx-btn {
+    font-size: .82rem;
+    border-color: rgba(232, 180, 76, .35);
+}
+.castle-root ::deep .cg-sfx-custom {
+    border-color: rgba(61, 220, 132, .65);
+    background: rgba(61, 220, 132, .2);
+    color: #3ddc84;
+}

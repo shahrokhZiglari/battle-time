@@ -1,7 +1,21 @@
 import { applyUnitTuning, COL, DEFAULT_ATTACK_DASH, DEFAULT_HALO_SPIN, LEVELS, normalizeAttackDash, normalizeHaloSpin, normalizeUnitTuning, ZOOM_STEP, type UnitTuningMap } from "../src/game/config";
 import { Game } from "../src/game/engine";
 import { render } from "../src/game/render";
-import { DEFAULT_SFX_VOLUMES, setNatureLayers, setSfxVolumes, setSound, sfx, SFX_KEYS, type SfxKey } from "../src/game/sound";
+import {
+  DEFAULT_SFX_VOLUMES,
+  getCustomSfxMeta,
+  previewSfx,
+  resetAllCustomSfx,
+  resetCustomSfx,
+  setNatureLayers,
+  setSfxVolumes,
+  setSound,
+  sfx,
+  SFX_KEYS,
+  stopSfxPreview,
+  uploadCustomSfx,
+  type SfxKey,
+} from "../src/game/sound";
 import { createRandomLevel, DEFAULT_RANDOM_MAP, normalizeRandomMap, validateRandomMap, PX_PER_METER, type RandomMapSettings } from "../src/game/map";
 import {
   copyTextToClipboard,
@@ -264,6 +278,39 @@ export function copySettingsText(text: string): Promise<boolean> {
 /** دانلودِ مستقیمِ فایلِ تنظیمات در مرورگر از سمتِ Blazor */
 export function downloadSettingsFile(text: string, filename = SETTINGS_FILE_NAME): boolean {
   return downloadJsonFile(text, filename);
+}
+
+/** فهرست افکت‌هایی که فایل صوتی سفارشی برایشان آپلود شده است */
+export function getCustomSoundsMeta(): Record<string, string> {
+  return getCustomSfxMeta() as Record<string, string>;
+}
+
+/** پخش آزمایشی یک افکت صوتی در پنجرهٔ تنظیمات Blazor */
+export function previewSoundEffect(key: string, level = 1): boolean {
+  if (!SFX_KEYS.includes(key as SfxKey)) return false;
+  return previewSfx(key as SfxKey, Number.isFinite(Number(level)) ? Number(level) : 1);
+}
+
+/** توقف پخش آزمایشی صدا */
+export function stopSoundPreview(): void {
+  stopSfxPreview();
+}
+
+/** باز کردن پنجرهٔ انتخاب فایل صوتی برای یک افکت از سمت Blazor */
+export async function uploadCustomSound(key: string): Promise<{ ok: boolean; cancelled?: boolean; name?: string; error?: string }> {
+  if (!SFX_KEYS.includes(key as SfxKey)) return { ok: false, error: "کلید افکت نامعتبر است." };
+  return uploadCustomSfx(key as SfxKey);
+}
+
+/** بازگردانی یک افکت به صدای پیش‌فرض */
+export async function resetCustomSound(key: string): Promise<void> {
+  if (!SFX_KEYS.includes(key as SfxKey)) return;
+  await resetCustomSfx(key as SfxKey);
+}
+
+/** بازگردانی همهٔ افکت‌ها به صداهای پیش‌فرض */
+export async function resetAllCustomSounds(): Promise<void> {
+  await resetAllCustomSfx();
 }
 
 function snapshot(s: Session) {

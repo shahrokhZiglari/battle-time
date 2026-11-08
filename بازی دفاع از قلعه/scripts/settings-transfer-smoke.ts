@@ -226,6 +226,8 @@ console.log("PASS: Invalid or empty JSON payloads are safely rejected with clear
   assert.ok(html.includes("خروجی / ورودی"), "SettingsPanel renders the transfer button");
   assert.ok(html.includes("۱۰٪"), "SettingsPanel displays 10% capture default");
   assert.ok(html.includes("۰ م"), "SettingsPanel displays 0m castle distance default");
+  assert.equal((html.match(/aria-label="پخش صدای /g) ?? []).length, 15, "SettingsPanel renders a Play button for all 15 sounds");
+  assert.equal((html.match(/aria-label="آپلود صدای جدید برای /g) ?? []).length, 15, "SettingsPanel renders an Upload button for all 15 sounds");
 
   const mapHtml = renderToStaticMarkup(
     React.createElement(RandomMapPanel, {

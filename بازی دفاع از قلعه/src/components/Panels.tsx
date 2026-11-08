@@ -1,4 +1,4 @@
-import { ReactNode, useRef, useState } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
 import {
   ATTACK_DASH_LIMITS,
   DEFAULT_ATTACK_DASH,
@@ -20,7 +20,22 @@ import {
   Save,
   SETTINGS_FILE_NAME,
 } from "../game/save";
-import { DEFAULT_SFX_VOLUMES, SFX_KEYS, SFX_FULL_NAMES, SFX_LABELS, type SfxKey } from "../game/sound";
+import {
+  DEFAULT_SFX_VOLUMES,
+  getCustomSfxMeta,
+  getPreviewingSfx,
+  onCustomSfxChange,
+  onPreviewSfxChange,
+  previewSfx,
+  resetAllCustomSfx,
+  resetCustomSfx,
+  SFX_FULL_NAMES,
+  SFX_KEYS,
+  SFX_LABELS,
+  stopSfxPreview,
+  uploadCustomSfx,
+  type SfxKey,
+} from "../game/sound";
 import GestureDemo from "./GestureDemo";
 import { RotateRow } from "./RotateControl";
 import type { Rotation } from "../game/view";
@@ -28,17 +43,21 @@ import type { Rotation } from "../game/view";
 export function Modal({
   children,
   wide,
+  medium,
   onScrim,
 }: {
   children: ReactNode;
   wide?: boolean;
+  medium?: boolean;
   onScrim?: () => void;
 }) {
   return (
     <div className="absolute inset-0 z-30 flex items-center justify-center p-3 sm:p-6">
       <div className="absolute inset-0 bg-abyss/72 backdrop-blur-[2px]" onClick={onScrim} />
       <div
-        className={`plate anim-rise relative max-h-full w-full overflow-y-auto thin-scroll ${wide ? "max-w-4xl" : "max-w-lg"}`}
+        className={`plate anim-rise relative max-h-full w-full overflow-y-auto thin-scroll ${
+          wide ? "max-w-4xl" : medium ? "max-w-2xl" : "max-w-lg"
+        }`}
       >
         {children}
       </div>
@@ -492,8 +511,38 @@ export function SettingsPanel({
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferText, setTransferText] = useState("");
   const [transferMsg, setTransferMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [customSfxMeta, setCustomSfxMeta] = useState<Partial<Record<SfxKey, string>>>(() => getCustomSfxMeta());
+  const [previewKey, setPreviewKey] = useState<SfxKey | null>(() => getPreviewingSfx());
+  const [sfxStatus, setSfxStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    const offCustom = onCustomSfxChange(() => setCustomSfxMeta(getCustomSfxMeta()));
+    const offPreview = onPreviewSfxChange((active) => setPreviewKey(active));
+    setCustomSfxMeta(getCustomSfxMeta());
+    return () => {
+      offCustom();
+      offPreview();
+      stopSfxPreview();
+    };
+  }, []);
+
+  const handleUploadSfx = async (key: SfxKey) => {
+    const res = await uploadCustomSfx(key);
+    if (res.cancelled) return;
+    if (res.ok) {
+      setSfxStatus({ ok: true, text: `صدای جدید «${res.name}» برای «${SFX_LABELS[key]}» ذخیره و پخش شد ✓` });
+    } else if (res.error) {
+      setSfxStatus({ ok: false, text: res.error });
+    }
+  };
+
+  const handleResetOneSfx = async (key: SfxKey) => {
+    await resetCustomSfx(key);
+    previewSfx(key, save.volumes?.[key] ?? DEFAULT_SFX_VOLUMES[key]);
+    setSfxStatus({ ok: true, text: `صدای «${SFX_LABELS[key]}» به حالت پیش‌فرض برگشت.` });
+  };
 
   const openTransfer = () => {
     setTransferText(exportSettingsJson(save));
@@ -691,7 +740,7 @@ export function SettingsPanel({
   }
 
   return (
-    <Modal onScrim={onBack}>
+    <Modal medium onScrim={onBack}>
       {/* سرِ فشرده — یک ردیفِ کوتاه تا برای محتوا جا بماند */}
       <div className="flex items-center justify-between gap-1.5 border-b border-brass/20 px-2 py-0.5">
         <div className="flex min-w-0 items-baseline gap-1.5">
@@ -719,7 +768,20 @@ export function SettingsPanel({
         <SettingCard
           title="صدا و افکت‌ها"
           right={
-            <span className="flex shrink-0 items-center gap-1">
+            <span className="flex flex-wrap shrink-0 items-center gap-1">
+              {Object.keys(customSfxMeta).length > 0 && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await resetAllCustomSfx();
+                    setSfxStatus({ ok: true, text: "همهٔ صداهای آپلودشده به صدای پیش‌فرض بازی برگشتند." });
+                  }}
+                  className="rounded border border-brass/40 bg-brass/10 px-1.5 py-[3px] text-[11px] font-bold leading-none text-brass transition-colors hover:bg-brass/20"
+                  title="حذف همهٔ صداهای آپلودشده و بازگشت به صداهای پیش‌فرض"
+                >
+                  صداهای پیش‌فرض ↺
+                </button>
+              )}
               <MiniToggle
                 label="طبیعت"
                 icon="🍃"
@@ -753,21 +815,90 @@ export function SettingsPanel({
             </span>
           }
         >
-          <div className="grid grid-cols-2 gap-x-1.5 gap-y-0">
+          {sfxStatus && (
+            <div
+              role={sfxStatus.ok ? "status" : "alert"}
+              className={`mb-1 rounded border px-2 py-0.5 text-[11.5px] font-bold ${
+                sfxStatus.ok ? "border-ally/40 bg-ally/10 text-ally" : "border-foe/40 bg-foe/10 text-foe"
+              }`}
+            >
+              {sfxStatus.text}
+            </div>
+          )}
+          <div className="grid grid-cols-1 gap-x-2 gap-y-[2px] sm:grid-cols-2">
             {SFX_KEYS.map((key, index) => {
               const v = Math.max(0, Math.min(1, Number(save.volumes?.[key] ?? DEFAULT_SFX_VOLUMES[key])));
-              // ردیفِ آخر (تعدادِ فرد) دو ستون را می‌گیرد تا هیچ خانهٔ خالیِ
-              // بی‌دلیلی در پایینِ کارت نماند.
+              const customName = customSfxMeta[key];
+              const isPlaying = previewKey === key;
               const span = index === SFX_KEYS.length - 1 && SFX_KEYS.length % 2 === 1;
               return (
                 <div
                   key={key}
-                  className={`flex h-[20px] min-w-0 items-center justify-between gap-1 rounded bg-white/[0.03] px-1 ${span ? "col-span-2" : ""}`}
+                  className={`flex min-h-[24px] min-w-0 items-center justify-between gap-1 rounded border border-white/[0.06] bg-white/[0.03] px-1.5 py-[1px] ${span ? "sm:col-span-2" : ""}`}
                 >
-                  <span className="min-w-0 flex-1 text-[11.5px] leading-[1.3] text-ash" title={SFX_FULL_NAMES[key]}>
+                  <span
+                    className={`min-w-0 flex-1 truncate text-[11.5px] leading-[1.3] ${customName ? "font-bold text-ally" : "text-ash"}`}
+                    title={customName ? `${SFX_FULL_NAMES[key]} · صدای سفارشی: ${customName}` : SFX_FULL_NAMES[key]}
+                  >
                     {SFX_LABELS[key]}
+                    {customName ? " ★" : ""}
                   </span>
-                  <span className="flex shrink-0 items-center gap-[2px]">
+                  <span className="flex shrink-0 items-center gap-[3px]">
+                    {/* دکمهٔ پخش آزمایشی */}
+                    <button
+                      type="button"
+                      onClick={() => previewSfx(key, v)}
+                      aria-label={`پخش صدای ${SFX_LABELS[key]}`}
+                      title={isPlaying ? `توقف پخش «${SFX_LABELS[key]}»` : `پخش آزمایشی «${SFX_LABELS[key]}»`}
+                      className={`grid h-5 w-5 shrink-0 place-items-center rounded border transition-colors ${
+                        isPlaying
+                          ? "border-brass bg-brass/25 text-brass"
+                          : "border-white/15 bg-white/[0.06] text-bone hover:border-brass/60 hover:bg-brass/15 hover:text-brass"
+                      }`}
+                    >
+                      {isPlaying ? (
+                        <svg width="9" height="9" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+                          <rect x="2" y="2" width="8" height="8" rx="1.2" />
+                        </svg>
+                      ) : (
+                        <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+                          <path d="M3 1.8v8.4L10.2 6 3 1.8z" />
+                        </svg>
+                      )}
+                    </button>
+                    {/* دکمهٔ آپلود / تغییر صدای افکت */}
+                    <button
+                      type="button"
+                      onClick={() => void handleUploadSfx(key)}
+                      aria-label={`آپلود صدای جدید برای ${SFX_LABELS[key]}`}
+                      title={
+                        customName
+                          ? `تغییر صدای «${SFX_LABELS[key]}» (فایل فعلی: ${customName})`
+                          : `آپلود و جایگزینی فایل صوتی جدید برای «${SFX_LABELS[key]}»`
+                      }
+                      className={`grid h-5 w-5 shrink-0 place-items-center rounded border transition-colors ${
+                        customName
+                          ? "border-ally/65 bg-ally/18 text-ally hover:bg-ally/30"
+                          : "border-white/15 bg-white/[0.06] text-ash hover:border-ally/55 hover:bg-ally/15 hover:text-bone"
+                      }`}
+                    >
+                      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M8 10.5V2.5M4.8 5.5 8 2.3l3.2 3.2" />
+                        <path d="M2.5 11v2a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-2" />
+                      </svg>
+                    </button>
+                    {/* دکمهٔ بازگردانی تکی به صدای پیش‌فرض (وقتی صدای سفارشی فعال است) */}
+                    {customName && (
+                      <button
+                        type="button"
+                        onClick={() => void handleResetOneSfx(key)}
+                        aria-label={`بازگردانی صدای پیش‌فرض ${SFX_LABELS[key]}`}
+                        title={`حذف فایل «${customName}» و بازگشت به صدای اصلی «${SFX_LABELS[key]}»`}
+                        className="grid h-5 w-5 shrink-0 place-items-center rounded border border-brass/45 bg-brass/12 text-[11px] font-bold leading-none text-brass transition-colors hover:bg-brass/25"
+                      >
+                        ↺
+                      </button>
+                    )}
                     <StepBtn
                       dir={-1}
                       label={`بلندی صدای ${SFX_LABELS[key]}`}
@@ -859,7 +990,8 @@ export function SettingsPanel({
           right={
             <button
               type="button"
-              onClick={() =>
+              onClick={() => {
+                void resetAllCustomSfx();
                 onChange((prev) => ({
                   ...prev,
                   ...DEFAULT_GLOBAL_SETTINGS,
@@ -873,9 +1005,9 @@ export function SettingsPanel({
                   haloSpin: DEFAULT_HALO_SPIN,
                   attackDash: DEFAULT_ATTACK_DASH,
                   volumes: { ...DEFAULT_GLOBAL_SETTINGS.volumes },
-                }))
-              }
-              title="بازگردانی همهٔ تنظیمات به مقادیر پیش‌فرض (بدون پاک شدن مراحل)"
+                }));
+              }}
+              title="بازگردانی همهٔ تنظیمات و صداها به مقادیر پیش‌فرض (بدون پاک شدن مراحل)"
               aria-label="بازنشانی تنظیمات به پیش‌فرض"
               className="rounded border border-white/12 px-1.5 py-[2px] text-[11.5px] leading-none text-ash transition-colors hover:bg-white/10 hover:text-bone"
             >

@@ -502,3 +502,12 @@ public static class CastleSettingsTransfer
         return el.ValueKind == JsonValueKind.Number && el.TryGetDouble(out value) && double.IsFinite(value);
     }
 }
+
+/// <summary>نتیجهٔ آپلود فایل صوتی سفارشی از سمت جاوااسکریپت</summary>
+public sealed class CustomSoundUploadResult
+{
+    public bool Ok { get; set; }
+    public bool Cancelled { get; set; }
+    public string? Name { get; set; }
+    public string? Error { get; set; }
+}
