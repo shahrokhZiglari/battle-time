@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { fa } from "../game/config";
+import { fa, MAX_ZOOM, MIN_ZOOM, ZOOM_STEP } from "../game/config";
 
 export interface HudData {
   num: number;
@@ -101,14 +101,14 @@ export default function Hud({
 
           <span className="h-4 w-px shrink-0 bg-white/15" />
 
-          {/* توان رزمی — نوارِ باریک */}
+          {/* توان رزمی — نوارِ توازن با عرض ۲ برابر */}
           <span
-            className="flex shrink-0 items-center gap-1"
+            className="flex shrink-0 items-center gap-1.5"
             title={d.factions.map((f) => `${f.name}: ${fa(f.troops)} نفر`).join(" · ")}
             aria-label="توان رزمی بازیکنان"
           >
-            <span className="hidden text-[10px] text-ash md:inline">توان</span>
-            <span className="flex h-2 w-12 overflow-hidden rounded-full bg-black/45 sm:w-24" dir="ltr">
+            <span className="hidden text-[10px] text-ash md:inline">توازن</span>
+            <span className="flex h-2.5 w-24 overflow-hidden rounded-full bg-black/50 ring-1 ring-white/10 sm:w-48 md:w-56" dir="ltr">
               {d.factions.map((f) => (
                 <span
                   key={f.id}
@@ -128,21 +128,35 @@ export default function Hud({
 
           <span className="min-w-1 flex-1" />
 
-          {/* زوم */}
-          {d.largeMap && (
-            <span className="flex shrink-0 items-center gap-0.5">
-              <button onClick={() => onZoom(-0.15)} disabled={d.zoom <= 1} className={minBtn} title="کوچک‌نمایی" aria-label="کوچک‌نمایی">−</button>
-              <button
-                onClick={() => onZoom(0)}
-                className="hidden min-w-9 shrink-0 rounded border border-white/12 bg-white/[0.06] px-1 text-[10px] font-bold leading-6 text-bone hover:bg-white/[0.14] sm:block"
-                title="بازنشانی زوم"
-              >
-                {fa(Math.round(d.zoom * 100))}٪
-              </button>
-              <button onClick={() => onZoom(0.15)} disabled={d.zoom >= 3} className={minBtn} title="بزرگ‌نمایی" aria-label="بزرگ‌نمایی">+</button>
-              <span className="mx-0.5 h-4 w-px shrink-0 bg-white/15" />
-            </span>
-          )}
+          {/* زوم — امکان ۳ مرحله زوم‌اوت عقب‌تر (تا ۵۵٪) و بزرگ‌نمایی تا ۳۰۰٪ */}
+          <span className="flex shrink-0 items-center gap-0.5">
+            <button
+              onClick={() => onZoom(-ZOOM_STEP)}
+              disabled={d.zoom <= MIN_ZOOM + 1e-6}
+              className={minBtn}
+              title="کوچک‌نمایی (عقب بردن دوربین)"
+              aria-label="کوچک‌نمایی"
+            >
+              −
+            </button>
+            <button
+              onClick={() => onZoom(0)}
+              className="hidden min-w-9 shrink-0 rounded border border-white/12 bg-white/[0.06] px-1 text-[10px] font-bold leading-6 text-bone hover:bg-white/[0.14] sm:block"
+              title="بازنشانی زوم به ۱۰۰٪"
+            >
+              {fa(Math.round(d.zoom * 100))}٪
+            </button>
+            <button
+              onClick={() => onZoom(ZOOM_STEP)}
+              disabled={d.zoom >= MAX_ZOOM - 1e-6}
+              className={minBtn}
+              title="بزرگ‌نمایی"
+              aria-label="بزرگ‌نمایی"
+            >
+              +
+            </button>
+            <span className="mx-0.5 h-4 w-px shrink-0 bg-white/15" />
+          </span>
 
           {/* درصدِ اعزام */}
           <span className="flex shrink-0 items-center gap-0.5" title="درصد نیروی اعزامی">

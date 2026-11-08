@@ -7,6 +7,9 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
 
 // src/game/config.ts
 var THEME_COUNT = 5;
+var ZOOM_STEP = 0.15;
+var MIN_ZOOM = 0.55;
+var MAX_ZOOM = 3;
 var CFG = {
   W: 1e3,
   H: 600,
@@ -25,15 +28,15 @@ var CFG = {
 };
 var TROOP_TYPES = ["normal", "fast", "heavy"];
 var UNITS = {
-  normal: { label: "عادی", power: 1, speed: 1 },
-  fast: { label: "سریع", power: 1, speed: 1.5 },
-  heavy: { label: "سنگین", power: 2, speed: 2 / 3 }
+  normal: { label: "عادی", power: 1, speed: 0.9 },
+  fast: { label: "سریع", power: 1, speed: 1.3 },
+  heavy: { label: "سنگین", power: 1.5, speed: 0.7 }
 };
 var UNIT_LIMITS = { power: [0.5, 4], speed: [0.4, 2.5] };
 var DEFAULT_UNIT_TUNING = {
-  normal: { power: 1, speed: 1 },
-  fast: { power: 1, speed: 1.5 },
-  heavy: { power: 2, speed: 2 / 3 }
+  normal: { power: 1, speed: 0.9 },
+  fast: { power: 1, speed: 1.3 },
+  heavy: { power: 1.5, speed: 0.7 }
 };
 var clampNumber = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 function normalizeUnitTuning(raw) {
@@ -58,13 +61,13 @@ function applyUnitTuning(raw) {
   }
   return tuning;
 }
-var DEFAULT_HALO_SPIN = 1.35;
+var DEFAULT_HALO_SPIN = 0.1;
 var HALO_SPIN_LIMITS = [0, 3];
 var normalizeHaloSpin = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? Math.round(clampNumber(n, ...HALO_SPIN_LIMITS) * 100) / 100 : DEFAULT_HALO_SPIN;
 };
-var DEFAULT_ATTACK_DASH = 1;
+var DEFAULT_ATTACK_DASH = 0.3;
 var ATTACK_DASH_LIMITS = [0, 1];
 var normalizeAttackDash = (v) => {
   const n = Number(v);
@@ -119,7 +122,7 @@ var INTRO_LEVELS = [
   {
     name: "تاکتیک",
     ai: 0.85,
-    hint: "سرباز سریع دو برابر تندتر است؛ سرباز سنگین دو برابر قدرت دارد اما با سرعت دوسوم حرکت می‌کند.",
+    hint: "سرباز سریع چابک‌تر است (سرعت ۱٫۳)؛ سرباز سنگین قدرت ۱٫۵ برابر دارد اما آرام‌تر حرکت می‌کند (سرعت ۰٫۷).",
     b: [
       [100, 300, 1, "barracks", 30],
       [300, 120, 0, "speed", 8],
@@ -203,14 +206,231 @@ var LEVELS = [
 ];
 var defOf = (b) => CFG.def[b.type];
 
+// src/game/custom-sfx.ts
+var DB_NAME = "bt_custom_sfx_v1";
+var STORE_NAME = "clips";
+var MAX_AUDIO_BYTES = 12 * 1024 * 1024;
+var records = /* @__PURE__ */ new Map();
+var listeners = /* @__PURE__ */ new Set();
+var initialized = false;
+function notify(key) {
+  for (const fn of listeners) {
+    try {
+      fn(key);
+    } catch {
+    }
+  }
+}
+function onCustomSfxChange(fn) {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
+function openDb() {
+  if (typeof indexedDB === "undefined") return Promise.resolve(null);
+  return new Promise((resolve) => {
+    try {
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(STORE_NAME)) {
+          db.createObjectStore(STORE_NAME, { keyPath: "key" });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+async function dbPut(entry) {
+  const db = await openDb();
+  if (!db) return;
+  await new Promise((resolve) => {
+    try {
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      tx.objectStore(STORE_NAME).put(entry);
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => {
+        db.close();
+        resolve();
+      };
+    } catch {
+      db.close();
+      resolve();
+    }
+  });
+}
+async function dbDelete(key) {
+  const db = await openDb();
+  if (!db) return;
+  await new Promise((resolve) => {
+    try {
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      const store = tx.objectStore(STORE_NAME);
+      if (key) store.delete(key);
+      else store.clear();
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => {
+        db.close();
+        resolve();
+      };
+    } catch {
+      db.close();
+      resolve();
+    }
+  });
+}
+async function decodeWithContext(ctx2, bytes) {
+  if (!ctx2 || typeof ctx2.decodeAudioData !== "function") return null;
+  try {
+    return await ctx2.decodeAudioData(bytes.slice(0));
+  } catch {
+    return null;
+  }
+}
+async function initCustomSfx(getCtx) {
+  if (initialized) return;
+  initialized = true;
+  const db = await openDb();
+  if (!db) return;
+  const rows = await new Promise((resolve) => {
+    try {
+      const tx = db.transaction(STORE_NAME, "readonly");
+      const req = tx.objectStore(STORE_NAME).getAll();
+      req.onsuccess = () => {
+        db.close();
+        resolve(Array.isArray(req.result) ? req.result : []);
+      };
+      req.onerror = () => {
+        db.close();
+        resolve([]);
+      };
+    } catch {
+      db.close();
+      resolve([]);
+    }
+  });
+  for (const row of rows) {
+    if (!row?.key || !(row.bytes instanceof ArrayBuffer)) continue;
+    records.set(row.key, {
+      key: row.key,
+      name: String(row.name || row.key),
+      mime: String(row.mime || "audio/*"),
+      bytes: row.bytes,
+      buffer: null
+    });
+  }
+  if (rows.length > 0) {
+    notify();
+    const ctx2 = getCtx();
+    if (ctx2) {
+      for (const rec of records.values()) {
+        if (!rec.buffer) rec.buffer = await decodeWithContext(ctx2, rec.bytes);
+      }
+      notify();
+    }
+  }
+}
+function hasCustomSfx(key) {
+  return records.has(key);
+}
+function getCustomSfxMeta() {
+  const out = {};
+  for (const [k, v] of records.entries()) out[k] = v.name;
+  return out;
+}
+async function ensureCustomSfxBuffer(key, ctx2) {
+  const rec = records.get(key);
+  if (!rec) return null;
+  if (rec.buffer) return rec.buffer;
+  rec.buffer = await decodeWithContext(ctx2, rec.bytes);
+  return rec.buffer;
+}
+function getCachedCustomSfxBuffer(key) {
+  return records.get(key)?.buffer ?? null;
+}
+async function setCustomSfxBytes(key, name, mime, bytes, ctx2) {
+  if (!bytes || bytes.byteLength === 0) {
+    return { ok: false, error: "فایل صوتی انتخاب‌شده خالی است." };
+  }
+  if (bytes.byteLength > MAX_AUDIO_BYTES) {
+    return { ok: false, error: "حجم فایل صوتی نباید بیشتر از ۱۲ مگابایت باشد." };
+  }
+  const buffer = await decodeWithContext(ctx2, bytes);
+  if (ctx2 && typeof ctx2.decodeAudioData === "function" && !buffer) {
+    return { ok: false, error: "فرمت این فایل صوتی توسط مرورگر پشتیبانی نمی‌شود." };
+  }
+  const cleanName = (name || key).trim().slice(0, 80);
+  records.set(key, { key, name: cleanName, mime: mime || "audio/*", bytes: bytes.slice(0), buffer });
+  await dbPut({ key, name: cleanName, mime: mime || "audio/*", bytes: bytes.slice(0) });
+  notify(key);
+  return { ok: true, name: cleanName };
+}
+async function clearCustomSfx(key) {
+  if (!records.has(key)) return;
+  records.delete(key);
+  await dbDelete(key);
+  notify(key);
+}
+async function clearAllCustomSfx() {
+  if (records.size === 0) return;
+  records.clear();
+  await dbDelete();
+  notify();
+}
+function pickCustomSfxFile(key, getCtx) {
+  if (typeof document === "undefined") {
+    return Promise.resolve({ ok: false, error: "محیط مرورگر در دسترس نیست." });
+  }
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "audio/*,.mp3,.wav,.ogg,.m4a,.aac,.webm,.flac";
+    input.style.display = "none";
+    let settled = false;
+    const finish = (res) => {
+      if (settled) return;
+      settled = true;
+      input.remove();
+      resolve(res);
+    };
+    input.addEventListener("cancel", () => finish({ ok: false, cancelled: true }));
+    input.addEventListener("change", async () => {
+      const file = input.files?.[0];
+      if (!file) {
+        finish({ ok: false, cancelled: true });
+        return;
+      }
+      try {
+        const bytes = await file.arrayBuffer();
+        const res = await setCustomSfxBytes(key, file.name, file.type || "audio/*", bytes, getCtx());
+        finish(res);
+      } catch {
+        finish({ ok: false, error: "خواندن فایل صوتی با خطا روبه‌رو شد." });
+      }
+    });
+    document.body.appendChild(input);
+    input.click();
+  });
+}
+
 // src/game/nature-audio.ts
 var ac = null;
 var master = null;
 var ambientGain = null;
+var ambientSource = null;
 var ambientTimer = null;
 var ambientOn = false;
 var marchOn = false;
 var marchGain = null;
+var marchSource = null;
 var marchTimer = null;
 var noiseBuffer = null;
 var layerVolume = { ambient: 1, march: 1 };
@@ -275,12 +495,35 @@ function setNatureVolume(kind, value) {
   if (kind === "ambient" && ambientGain) ambientGain.gain.setTargetAtTime(0.9 * v, a.currentTime, 0.15);
   if (kind === "march" && marchGain) marchGain.gain.setTargetAtTime(0.85 * v, a.currentTime, 0.15);
 }
+function startCustomLoop(kind, a, gainNode) {
+  const playBuf = (buf) => {
+    if (!buf) return;
+    if (kind === "ambient" && (!ambientOn || ambientGain !== gainNode)) return;
+    if (kind === "march" && (!marchOn || marchGain !== gainNode)) return;
+    const src = a.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    src.connect(gainNode);
+    src.start();
+    if (kind === "ambient") ambientSource = src;
+    else marchSource = src;
+  };
+  const cached = getCachedCustomSfxBuffer(kind);
+  if (cached) playBuf(cached);
+  else void ensureCustomSfxBuffer(kind, a).then(playBuf);
+}
 function startAmbient(a) {
-  if (ambientTimer !== null) return;
+  if (ambientGain !== null) return;
   ambientGain = a.createGain();
-  ambientGain.gain.value = 0;
+  ambientGain.gain.value = 0.9 * layerVolume.ambient;
   ambientGain.connect(master);
-  windLayer(a, ambientGain, 0.05 * layerVolume.ambient, 0);
+  if (hasCustomSfx("ambient")) {
+    startCustomLoop("ambient", a, ambientGain);
+    return;
+  }
+  ambientGain.gain.value = 0;
+  const wind = windLayer(a, ambientGain, 0.05 * layerVolume.ambient, 0);
+  ambientSource = wind.source;
   const chirp = () => {
     if (!ambientOn || !ambientGain) return;
     const now = a.currentTime;
@@ -307,25 +550,37 @@ function stopAmbient() {
     clearTimeout(ambientTimer);
     ambientTimer = null;
   }
+  if (ambientSource) {
+    try {
+      ambientSource.stop();
+    } catch {
+    }
+    ambientSource = null;
+  }
   if (ambientGain && ac) {
     const g = ambientGain;
     g.gain.cancelScheduledValues(ac.currentTime);
-    g.gain.linearRampToValueAtTime(0, ac.currentTime + 0.6);
+    g.gain.linearRampToValueAtTime(0, ac.currentTime + 0.35);
     window.setTimeout(() => {
       try {
         g.disconnect();
       } catch {
       }
-    }, 800);
+    }, 450);
   }
   ambientGain = null;
   ambientOn = false;
 }
 function startMarch(a) {
-  if (marchTimer !== null) return;
+  if (marchGain !== null) return;
   marchGain = a.createGain();
-  marchGain.gain.value = 0;
+  marchGain.gain.value = 0.85 * layerVolume.march;
   marchGain.connect(master);
+  if (hasCustomSfx("march")) {
+    startCustomLoop("march", a, marchGain);
+    return;
+  }
+  marchGain.gain.value = 0;
   const step = () => {
     if (!marchOn || !marchGain) return;
     const now = a.currentTime;
@@ -362,49 +617,127 @@ function stopMarch() {
     clearTimeout(marchTimer);
     marchTimer = null;
   }
+  if (marchSource) {
+    try {
+      marchSource.stop();
+    } catch {
+    }
+    marchSource = null;
+  }
   if (marchGain && ac) {
     const g = marchGain;
     g.gain.cancelScheduledValues(ac.currentTime);
-    g.gain.linearRampToValueAtTime(0, ac.currentTime + 0.4);
+    g.gain.linearRampToValueAtTime(0, ac.currentTime + 0.3);
     window.setTimeout(() => {
       try {
         g.disconnect();
       } catch {
       }
-    }, 600);
+    }, 400);
   }
   marchGain = null;
   marchOn = false;
 }
-function playCaptureSound() {
+function previewNatureSample(kind, level, onDone) {
   const a = audio();
-  if (!a || !master) return;
-  const now = a.currentTime;
-  const notes = [392, 523, 659, 784];
-  notes.forEach((freq, i) => {
-    const osc = a.createOscillator();
-    const g = a.createGain();
-    const t = now + i * 0.085;
-    osc.type = "triangle";
-    osc.frequency.setValueAtTime(freq, t);
-    g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(0.16, t + 0.02);
-    g.gain.exponentialRampToValueAtTime(8e-4, t + 0.5);
-    osc.connect(g).connect(master);
-    osc.start(t);
-    osc.stop(t + 0.55);
-  });
-  const boom = a.createOscillator();
-  const bg = a.createGain();
-  boom.type = "sine";
-  boom.frequency.setValueAtTime(160, now);
-  boom.frequency.exponentialRampToValueAtTime(42, now + 0.32);
-  bg.gain.setValueAtTime(0.18, now);
-  bg.gain.exponentialRampToValueAtTime(8e-4, now + 0.42);
-  boom.connect(bg).connect(master);
-  boom.start(now);
-  boom.stop(now + 0.45);
+  if (!a || !master) {
+    onDone?.();
+    return () => {
+    };
+  }
+  const bus = a.createGain();
+  bus.gain.value = Math.max(0.05, Math.min(1, level));
+  bus.connect(a.destination);
+  const timers = [];
+  const sources = [];
+  let closed = false;
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    for (const t of timers) clearTimeout(t);
+    for (const s of sources) {
+      try {
+        s.stop();
+      } catch {
+      }
+    }
+    try {
+      bus.disconnect();
+    } catch {
+    }
+    onDone?.();
+  };
+  if (kind === "ambient") {
+    const w = windLayer(a, bus, 0.08, 0);
+    sources.push(w.source);
+    for (const delay of [120, 920]) {
+      timers.push(setTimeout(() => {
+        if (closed) return;
+        const now = a.currentTime;
+        const osc = a.createOscillator();
+        const g = a.createGain();
+        osc.type = "sine";
+        const base = delay < 500 ? 1680 : 1960;
+        osc.frequency.setValueAtTime(base, now);
+        osc.frequency.exponentialRampToValueAtTime(base * 1.45, now + 0.08);
+        osc.frequency.exponentialRampToValueAtTime(base * 0.88, now + 0.18);
+        g.gain.setValueAtTime(1e-4, now);
+        g.gain.linearRampToValueAtTime(0.06, now + 0.02);
+        g.gain.exponentialRampToValueAtTime(8e-4, now + 0.32);
+        osc.connect(g).connect(bus);
+        osc.start(now);
+        osc.stop(now + 0.35);
+      }, delay));
+    }
+    timers.push(setTimeout(cleanup, 2100));
+  } else {
+    for (let i = 0; i < 4; i++) {
+      timers.push(setTimeout(() => {
+        if (closed) return;
+        const now = a.currentTime;
+        const thud = a.createOscillator();
+        const tg = a.createGain();
+        thud.type = "sine";
+        thud.frequency.setValueAtTime(125, now);
+        thud.frequency.exponentialRampToValueAtTime(48, now + 0.1);
+        tg.gain.setValueAtTime(1e-4, now);
+        tg.gain.linearRampToValueAtTime(0.16, now + 8e-3);
+        tg.gain.exponentialRampToValueAtTime(8e-4, now + 0.13);
+        thud.connect(tg).connect(bus);
+        thud.start(now);
+        thud.stop(now + 0.15);
+        const src = a.createBufferSource();
+        src.buffer = noise(a);
+        const filter = a.createBiquadFilter();
+        filter.type = "bandpass";
+        filter.frequency.value = 1500;
+        const ng = a.createGain();
+        ng.gain.setValueAtTime(1e-4, now);
+        ng.gain.linearRampToValueAtTime(0.06, now + 0.01);
+        ng.gain.exponentialRampToValueAtTime(8e-4, now + 0.12);
+        src.connect(filter).connect(ng).connect(bus);
+        src.start(now);
+        src.stop(now + 0.14);
+      }, i * 310));
+    }
+    timers.push(setTimeout(cleanup, 1450));
+  }
+  return cleanup;
 }
+onCustomSfxChange((changedKey) => {
+  if ((!changedKey || changedKey === "ambient") && ambientOn) {
+    const a = audio();
+    stopAmbient();
+    ambientOn = true;
+    if (a) startAmbient(a);
+  }
+  if ((!changedKey || changedKey === "march") && marchOn) {
+    const a = audio();
+    stopMarch();
+    marchOn = true;
+    if (a) startMarch(a);
+  }
+});
 function stopAllNature() {
   stopAmbient();
   stopMarch();
@@ -428,21 +761,27 @@ var SFX_KEYS = [
   "start",
   "hover"
 ];
-var volumes = {};
+var DEFAULT_SFX_VOLUMES = Object.fromEntries(
+  SFX_KEYS.map((k) => [k, k === "capture" ? 0.1 : 1])
+);
+var volumes = { ...DEFAULT_SFX_VOLUMES };
 function setSfxVolumes(next) {
   for (const key of SFX_KEYS) {
     const raw = next?.[key];
-    volumes[key] = Number.isFinite(Number(raw)) ? Math.max(0, Math.min(1, Number(raw))) : 1;
+    volumes[key] = Number.isFinite(Number(raw)) ? Math.max(0, Math.min(1, Number(raw))) : DEFAULT_SFX_VOLUMES[key];
   }
-  setNatureVolume("ambient", volumes.ambient ?? 1);
-  setNatureVolume("march", volumes.march ?? 1);
+  setNatureVolume("ambient", volumes.ambient ?? DEFAULT_SFX_VOLUMES.ambient);
+  setNatureVolume("march", volumes.march ?? DEFAULT_SFX_VOLUMES.march);
 }
-var vol = (key) => key ? volumes[key] ?? 1 : 1;
+var vol = (key) => key ? volumes[key] ?? DEFAULT_SFX_VOLUMES[key] : 1;
 var ac2 = null;
 var enabled = true;
 var setSound = (v) => {
   enabled = v;
-  if (!v) stopAllNature();
+  if (!v) {
+    stopAllNature();
+    stopSfxPreview();
+  }
 };
 function ctx() {
   try {
@@ -455,6 +794,59 @@ function ctx() {
   } catch {
     return null;
   }
+}
+if (typeof window !== "undefined" && typeof indexedDB !== "undefined") {
+  void initCustomSfx(ctx);
+}
+function playCustomClip(key, level, onEnded) {
+  if (level <= 5e-4) return null;
+  const a = ctx();
+  if (!a) return null;
+  let stopped = false;
+  let activeSrc = null;
+  let timer = null;
+  const gainNode = a.createGain();
+  gainNode.gain.value = 0.65 * level;
+  gainNode.connect(a.destination);
+  const cleanup = () => {
+    if (stopped) return;
+    stopped = true;
+    if (timer) clearTimeout(timer);
+    if (activeSrc) {
+      try {
+        activeSrc.stop();
+      } catch {
+      }
+      activeSrc = null;
+    }
+    try {
+      gainNode.disconnect();
+    } catch {
+    }
+    onEnded?.();
+  };
+  const startBuffer = (buf) => {
+    if (stopped || !buf) {
+      if (!buf) cleanup();
+      return;
+    }
+    try {
+      const src = a.createBufferSource();
+      src.buffer = buf;
+      src.connect(gainNode);
+      activeSrc = src;
+      src.onended = cleanup;
+      src.start();
+      const durMs = Math.max(120, Math.min(15e3, (buf.duration ?? 2) * 1e3 + 80));
+      timer = setTimeout(cleanup, durMs);
+    } catch {
+      cleanup();
+    }
+  };
+  const cached = getCachedCustomSfxBuffer(key);
+  if (cached) startBuffer(cached);
+  else void ensureCustomSfxBuffer(key, a).then(startBuffer);
+  return cleanup;
 }
 function beep(f, d = 0.1, t = "square", v = 0.04, key) {
   if (!enabled) return;
@@ -498,121 +890,80 @@ function sweep(f0, f1, d = 0.18, t = "triangle", v = 0.05, key) {
   }
 }
 var jingle = (a, key) => a.forEach((f, i) => setTimeout(() => beep(f, 0.2, "triangle", 0.06, key), i * 125));
-function brass(ctxA, freq, at, dur, vol2, cut = 2600, dest, vibrato = 6e-3) {
-  const now = ctxA.currentTime;
-  const filter = ctxA.createBiquadFilter();
-  filter.type = "lowpass";
-  filter.frequency.setValueAtTime(500, now + at);
-  filter.frequency.exponentialRampToValueAtTime(cut, now + at + 0.05);
-  filter.frequency.exponentialRampToValueAtTime(cut * 0.72, now + at + dur);
-  filter.Q.value = 1.4;
-  const g = ctxA.createGain();
-  g.gain.setValueAtTime(1e-4, now + at);
-  g.gain.exponentialRampToValueAtTime(vol2, now + at + 0.02);
-  g.gain.setValueAtTime(vol2, now + at + dur * 0.78);
-  g.gain.exponentialRampToValueAtTime(6e-4, now + at + dur);
-  filter.connect(g);
-  g.connect(dest ?? ctxA.destination);
-  for (const detune of [-6, 6]) {
-    const o = ctxA.createOscillator();
-    o.type = "sawtooth";
-    o.frequency.value = freq;
-    o.detune.value = detune;
-    const lfo = ctxA.createOscillator();
-    const lfoGain = ctxA.createGain();
-    lfo.frequency.value = 5.4;
-    lfoGain.gain.value = freq * vibrato;
-    lfo.connect(lfoGain);
-    lfoGain.connect(o.frequency);
-    o.connect(filter);
-    o.start(now + at);
-    o.stop(now + at + dur + 0.06);
-    lfo.start(now + at);
-    lfo.stop(now + at + dur + 0.06);
-  }
-}
-function noiseHit(ctxA, at, dur, freq, vol2, q = 1.2, dest) {
-  const length = Math.max(1, Math.floor(ctxA.sampleRate * dur));
-  const buffer = ctxA.createBuffer(1, length, ctxA.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / length);
-  const src = ctxA.createBufferSource();
-  src.buffer = buffer;
-  const filter = ctxA.createBiquadFilter();
-  filter.type = "bandpass";
-  filter.frequency.value = freq;
-  filter.Q.value = q;
-  const g = ctxA.createGain();
-  g.gain.value = vol2;
-  src.connect(filter);
-  filter.connect(g);
-  g.connect(dest ?? ctxA.destination);
-  src.start(ctxA.currentTime + at);
-}
-function bell(ctxA, freq, at, dur, vol2, dest) {
-  const now = ctxA.currentTime;
-  for (const [mult, amp, decay] of [[1, 1, 1], [2.01, 0.42, 0.62], [3.02, 0.2, 0.4], [4.17, 0.1, 0.28]]) {
-    const o = ctxA.createOscillator();
-    const g = ctxA.createGain();
-    o.type = "sine";
-    o.frequency.value = freq * mult;
-    g.gain.setValueAtTime(1e-4, now + at);
-    g.gain.exponentialRampToValueAtTime(vol2 * amp, now + at + 6e-3);
-    g.gain.exponentialRampToValueAtTime(4e-4, now + at + dur * decay);
-    o.connect(g);
-    g.connect(dest ?? ctxA.destination);
-    o.start(now + at);
-    o.stop(now + at + dur * decay + 0.05);
-  }
-}
 function captureFanfare() {
   if (!enabled) return;
+  const level = vol("capture");
+  if (level <= 1e-3) return;
+  if (hasCustomSfx("capture")) {
+    playCustomClip("capture", level);
+    return;
+  }
   const a = ctx();
   if (!a) return;
   try {
-    const level = vol("capture");
-    if (level <= 1e-3) return;
-    const bus = a.createGain();
-    bus.gain.value = 0.72 * level;
-    const shaper = a.createWaveShaper();
-    const curve = new Float32Array(1024);
-    for (let i = 0; i < curve.length; i++) {
-      const x = i / (curve.length - 1) * 2 - 1;
-      curve[i] = Math.tanh(x * 1.6) / Math.tanh(1.6);
-    }
-    shaper.curve = curve;
-    shaper.oversample = "2x";
-    bus.connect(shaper);
-    shaper.connect(a.destination);
     const now = a.currentTime;
-    const drum = a.createOscillator();
-    const drumGain = a.createGain();
-    drum.type = "sine";
-    drum.frequency.setValueAtTime(168, now);
-    drum.frequency.exponentialRampToValueAtTime(46, now + 0.28);
-    drumGain.gain.setValueAtTime(0.34, now);
-    drumGain.gain.exponentialRampToValueAtTime(1e-3, now + 0.42);
-    drum.connect(drumGain);
-    drumGain.connect(bus);
-    drum.start();
-    drum.stop(now + 0.45);
-    noiseHit(a, 0, 0.2, 220, 0.13, 0.8, bus);
-    noiseHit(a, 0.01, 0.9, 5600, 0.045, 0.9, bus);
-    for (const [f, v] of [[130.81, 0.062], [196, 0.058], [261.63, 0.055], [329.63, 0.045], [392, 0.03]]) {
-      brass(a, f, 0, 0.5, v, 2300, bus);
+    const bus = a.createGain();
+    bus.gain.setValueAtTime(0.42 * level, now);
+    const warmFilter = a.createBiquadFilter();
+    warmFilter.type = "lowpass";
+    warmFilter.frequency.setValueAtTime(2400, now);
+    warmFilter.Q.value = 0.7;
+    bus.connect(warmFilter);
+    warmFilter.connect(a.destination);
+    const thud = a.createOscillator();
+    const thudGain = a.createGain();
+    thud.type = "sine";
+    thud.frequency.setValueAtTime(132, now);
+    thud.frequency.exponentialRampToValueAtTime(55, now + 0.18);
+    thudGain.gain.setValueAtTime(0.24, now);
+    thudGain.gain.exponentialRampToValueAtTime(8e-4, now + 0.24);
+    thud.connect(thudGain);
+    thudGain.connect(bus);
+    thud.start(now);
+    thud.stop(now + 0.26);
+    for (const [freq, amp] of [[261.63, 0.11], [392, 0.09]]) {
+      const pad = a.createOscillator();
+      const padGain = a.createGain();
+      pad.type = "triangle";
+      pad.frequency.setValueAtTime(freq, now);
+      padGain.gain.setValueAtTime(1e-4, now);
+      padGain.gain.linearRampToValueAtTime(amp, now + 0.03);
+      padGain.gain.exponentialRampToValueAtTime(8e-4, now + 0.52);
+      pad.connect(padGain);
+      padGain.connect(bus);
+      pad.start(now);
+      pad.stop(now + 0.55);
     }
-    for (const [f, at] of [[392, 0.18], [523.25, 0.33], [659.25, 0.48]]) {
-      brass(a, f, at, 0.24, 0.09, 3300, bus, 4e-3);
-      brass(a, f / 2, at, 0.24, 0.03, 1650, bus, 4e-3);
+    const notes = [
+      [392, 0, 0.28, 0.15],
+      [523.25, 0.065, 0.3, 0.16],
+      [659.25, 0.13, 0.34, 0.17],
+      [783.99, 0.195, 0.44, 0.2]
+    ];
+    for (const [freq, at, dur, amp] of notes) {
+      const osc = a.createOscillator();
+      const overtone = a.createOscillator();
+      const g = a.createGain();
+      const og = a.createGain();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(freq, now + at);
+      overtone.type = "sine";
+      overtone.frequency.setValueAtTime(freq * 2, now + at);
+      g.gain.setValueAtTime(1e-4, now + at);
+      g.gain.linearRampToValueAtTime(amp, now + at + 0.012);
+      g.gain.exponentialRampToValueAtTime(6e-4, now + at + dur);
+      og.gain.setValueAtTime(1e-4, now + at);
+      og.gain.linearRampToValueAtTime(amp * 0.28, now + at + 0.01);
+      og.gain.exponentialRampToValueAtTime(4e-4, now + at + dur * 0.7);
+      osc.connect(g);
+      overtone.connect(og);
+      g.connect(bus);
+      og.connect(bus);
+      osc.start(now + at);
+      overtone.start(now + at);
+      osc.stop(now + at + dur + 0.03);
+      overtone.stop(now + at + dur * 0.7 + 0.03);
     }
-    brass(a, 783.99, 0.64, 0.62, 0.1, 4e3, bus, 9e-3);
-    brass(a, 391.99, 0.64, 0.62, 0.045, 2200, bus, 9e-3);
-    for (const [f, v] of [[130.81, 0.05], [196, 0.045], [261.63, 0.042], [329.63, 0.036], [523.25, 0.03], [659.25, 0.024]]) {
-      brass(a, f, 0.64, 0.62, v, 2400, bus);
-    }
-    bell(a, 1046.5, 0.64, 1.15, 0.05, bus);
-    bell(a, 1567.98, 0.66, 0.95, 0.028, bus);
-    noiseHit(a, 0.64, 0.85, 7600, 0.022, 1, bus);
   } catch {
   }
 }
@@ -624,21 +975,124 @@ function setNatureLayers(ambient, march) {
   setNatureSound("ambient", ambient);
   setNatureSound("march", march);
 }
+function runDiscrete(key, fallback) {
+  if (!enabled) return;
+  const level = vol(key);
+  if (level <= 1e-3) return;
+  if (hasCustomSfx(key)) {
+    playCustomClip(key, level);
+    return;
+  }
+  fallback();
+}
 var sfx = {
-  select: () => beep(560, 0.05, "triangle", 0.045, "select"),
-  deselect: () => beep(330, 0.05, "sine", 0.04, "deselect"),
-  send: () => sweep(420, 720, 0.16, "triangle", 0.05, "send"),
+  select: () => runDiscrete("select", () => beep(560, 0.05, "triangle", 0.045, "select")),
+  deselect: () => runDiscrete("deselect", () => beep(330, 0.05, "sine", 0.04, "deselect")),
+  send: () => runDiscrete("send", () => sweep(420, 720, 0.16, "triangle", 0.05, "send")),
   capture: () => captureFanfare(),
-  lose: () => beep(170, 0.32, "sawtooth", 0.05, "lose"),
-  repel: () => beep(220, 0.1, "sawtooth", 0.04, "repel"),
-  upgrade: () => beep(680, 0.16, "triangle", 0.05, "upgrade"),
-  shot: () => beep(920, 0.045, "square", 0.018, "shot"),
-  clash: () => beep(300, 0.06, "sawtooth", 0.028, "clash"),
-  win: () => jingle([523, 659, 784, 1047], "win"),
-  defeat: () => jingle([392, 330, 262, 196], "defeat"),
-  start: () => jingle([392, 523], "start"),
-  hover: () => beep(760, 0.03, "sine", 0.02, "hover")
+  lose: () => runDiscrete("lose", () => beep(170, 0.32, "sawtooth", 0.05, "lose")),
+  repel: () => runDiscrete("repel", () => beep(220, 0.1, "sawtooth", 0.04, "repel")),
+  upgrade: () => runDiscrete("upgrade", () => beep(680, 0.16, "triangle", 0.05, "upgrade")),
+  shot: () => runDiscrete("shot", () => beep(920, 0.045, "square", 0.018, "shot")),
+  clash: () => runDiscrete("clash", () => beep(300, 0.06, "sawtooth", 0.028, "clash")),
+  win: () => runDiscrete("win", () => jingle([523, 659, 784, 1047], "win")),
+  defeat: () => runDiscrete("defeat", () => jingle([392, 330, 262, 196], "defeat")),
+  start: () => runDiscrete("start", () => jingle([392, 523], "start")),
+  hover: () => runDiscrete("hover", () => beep(760, 0.03, "sine", 0.02, "hover"))
 };
+var activePreview = null;
+var previewListeners = /* @__PURE__ */ new Set();
+function emitPreview(active) {
+  for (const fn of previewListeners) {
+    try {
+      fn(active);
+    } catch {
+    }
+  }
+}
+function stopSfxPreview() {
+  if (!activePreview) return;
+  const cur = activePreview;
+  activePreview = null;
+  cur.stop();
+  emitPreview(null);
+}
+function previewSfx(key, overrideLevel) {
+  if (activePreview?.key === key) {
+    stopSfxPreview();
+    return false;
+  }
+  stopSfxPreview();
+  const rawLevel = overrideLevel !== void 0 ? overrideLevel : vol(key);
+  const level = rawLevel > 5e-3 ? Math.max(0.05, Math.min(1, rawLevel)) : DEFAULT_SFX_VOLUMES[key];
+  if (hasCustomSfx(key)) {
+    const stopClip = playCustomClip(key, level, () => {
+      if (activePreview?.key === key) {
+        activePreview = null;
+        emitPreview(null);
+      }
+    });
+    if (stopClip) {
+      activePreview = { key, stop: stopClip };
+      emitPreview(key);
+      return true;
+    }
+  }
+  if (key === "ambient" || key === "march") {
+    const stopSample = previewNatureSample(key, level, () => {
+      if (activePreview?.key === key) {
+        activePreview = null;
+        emitPreview(null);
+      }
+    });
+    activePreview = { key, stop: stopSample };
+    emitPreview(key);
+    return true;
+  }
+  const prevEnabled = enabled;
+  const prevVol = volumes[key];
+  enabled = true;
+  volumes[key] = level;
+  try {
+    sfx[key]();
+  } finally {
+    const holdMs = key === "win" || key === "defeat" ? 560 : key === "start" || key === "capture" ? 650 : 280;
+    const timer = setTimeout(() => {
+      enabled = prevEnabled;
+      volumes[key] = prevVol;
+      if (activePreview?.key === key) {
+        activePreview = null;
+        emitPreview(null);
+      }
+    }, holdMs);
+    activePreview = {
+      key,
+      stop: () => {
+        clearTimeout(timer);
+        enabled = prevEnabled;
+        volumes[key] = prevVol;
+      }
+    };
+    emitPreview(key);
+  }
+  return true;
+}
+async function uploadCustomSfx(key) {
+  await initCustomSfx(ctx);
+  const res = await pickCustomSfxFile(key, ctx);
+  if (res.ok) {
+    previewSfx(key);
+  }
+  return res;
+}
+async function resetCustomSfx(key) {
+  if (activePreview?.key === key) stopSfxPreview();
+  await clearCustomSfx(key);
+}
+async function resetAllCustomSfx() {
+  stopSfxPreview();
+  await clearAllCustomSfx();
+}
 
 // src/game/troops.ts
 var EPSILON = 1e-8;
@@ -851,13 +1305,41 @@ var DEFAULT_RANDOM_MAP = {
   ships: 2,
   boats: 3,
   largeMap: true,
-  minDistance: 30,
-  randomRoads: false
+  minDistance: 0
 };
 var PX_PER_METER = 6;
 var MAX_LAKES = 16;
 var MAX_SHIPS = 12;
 var MAX_BOATS = 16;
+var NATIVE_RANDOM = Math.random;
+var entropyCounter = 0;
+var recentLayouts = [];
+var recentThemes = [];
+function createUnpredictableRng() {
+  if (Math.random !== NATIVE_RANDOM) {
+    const seed2 = (Math.floor(Math.random() * 2147483647) || 1) >>> 0;
+    return { rand: () => Math.random(), seed: seed2, isMocked: true };
+  }
+  const buf = new Uint32Array(2);
+  if (typeof globalThis.crypto?.getRandomValues === "function") {
+    globalThis.crypto.getRandomValues(buf);
+  } else {
+    buf[0] = NATIVE_RANDOM() * 4294967295 >>> 0;
+    buf[1] = NATIVE_RANDOM() * 4294967295 >>> 0;
+  }
+  const hires = typeof globalThis.performance?.now === "function" ? Math.floor(globalThis.performance.now() * 1e3) : 0;
+  const timeMix = Math.imul((Date.now() ^ hires) >>> 0, 2654435761);
+  let state = (buf[0] ^ timeMix ^ Math.imul(++entropyCounter, 2246822507)) >>> 0;
+  if (state === 0) state = 1831565813;
+  const seed = (buf[1] ^ Math.imul(state, 3266489909)) >>> 0 || 1;
+  const rand = () => {
+    state = state + 1831565813 | 0;
+    let t = Math.imul(state ^ state >>> 15, 1 | state);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+  return { rand, seed, isMocked: false };
+}
 function normalizeRandomMap(input) {
   const source = { ...DEFAULT_RANDOM_MAP, ...input };
   const whole = (value, low, high) => Number.isFinite(Number(value)) ? Math.max(low, Math.min(high, Math.floor(Number(value)))) : low;
@@ -871,8 +1353,7 @@ function normalizeRandomMap(input) {
     ships: whole(source.ships, 0, MAX_SHIPS),
     boats: whole(source.boats, 0, MAX_BOATS),
     largeMap: source.largeMap !== false,
-    minDistance: whole(source.minDistance, 0, 120),
-    randomRoads: source.randomRoads === true
+    minDistance: whole(source.minDistance, 0, 120)
   };
 }
 function validateRandomMap(input) {
@@ -895,15 +1376,15 @@ function validateRandomMap(input) {
   }
   return null;
 }
-function shuffled(items) {
+function shuffled(items, rand) {
   for (let i = items.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rand() * (i + 1));
     [items[i], items[j]] = [items[j], items[i]];
   }
   return items;
 }
-function furthestStarts(points, count) {
-  const chosen = [Math.floor(Math.random() * points.length)];
+function furthestStarts(points, count, rand) {
+  const chosen = [Math.floor(rand() * points.length)];
   while (chosen.length < count) {
     let best = -1;
     let bestDistance = -1;
@@ -911,25 +1392,29 @@ function furthestStarts(points, count) {
       if (chosen.includes(i)) continue;
       const p = points[i];
       const minDistance = Math.min(...chosen.map((index) => Math.hypot(p.x - points[index].x, p.y - points[index].y)));
-      if (minDistance > bestDistance) {
+      const score = minDistance * (0.9 + rand() * 0.2);
+      if (score > bestDistance) {
         best = i;
-        bestDistance = minDistance;
+        bestDistance = score;
       }
     }
     if (best >= 0) chosen.push(best);
   }
-  return chosen;
+  return shuffled(chosen, rand);
 }
-var LAYOUTS = ["scatter", "rows", "ring", "clusters", "valley"];
+var LAYOUTS = ["scatter", "rows", "ring", "clusters", "valley", "twin", "spiral", "cross"];
 var LAYOUT_LABEL = {
-  scatter: "پراکنده",
-  rows: "ردیفی",
-  ring: "حلقه‌ای",
-  clusters: "خوشه‌ای",
-  valley: "دره"
+  scatter: "مجمع‌الجزایر آزاد",
+  rows: "جبهه‌های موجی",
+  ring: "حلقه‌ای چرخان",
+  clusters: "خوشه‌های جزیره‌ای",
+  valley: "تنگهٔ مارپیچ",
+  twin: "دو قارهٔ روبه‌رو",
+  spiral: "مارپیچ کهکشانی",
+  cross: "چهارراه دریایی"
 };
 function repairOverlap(cells, sep, w, h, margin) {
-  for (let pass = 0; pass < 60; pass++) {
+  for (let pass = 0; pass < 70; pass++) {
     let moved = false;
     for (let i = 0; i < cells.length; i++) {
       for (let j = i + 1; j < cells.length; j++) {
@@ -953,57 +1438,90 @@ function repairOverlap(cells, sep, w, h, margin) {
     if (!moved) break;
   }
 }
-function scatterCells(count, w, h, margin, sep, centerClear) {
+function applySymmetryTransform(cells, w, h, margin, rand) {
+  const mirrorX = rand() < 0.5;
+  const mirrorY = rand() < 0.5;
+  const rot = (rand() - 0.5) * 0.46;
+  const cos = Math.cos(rot);
+  const sin = Math.sin(rot);
+  const cx = w / 2;
+  const cy = h / 2;
+  const scaleY = h / w;
+  for (const p of cells) {
+    let nx = (p.x - cx) * (mirrorX ? -1 : 1);
+    let ny = (p.y - cy) / scaleY * (mirrorY ? -1 : 1);
+    const rx = nx * cos - ny * sin;
+    const ry = (nx * sin + ny * cos) * scaleY;
+    p.x = Math.max(margin * 0.65, Math.min(w - margin * 0.65, cx + rx));
+    p.y = Math.max(margin * 0.65, Math.min(h - margin * 0.65, cy + ry));
+  }
+}
+function scatterCells(count, w, h, margin, sep, centerClear, rand) {
   const cells = [];
   let minSep = sep;
   for (let attempt = 0; attempt < 6e3 && cells.length < count; attempt++) {
-    const p = { x: margin + Math.random() * (w - margin * 2), y: margin + Math.random() * (h - margin * 2) };
+    const p = { x: margin + rand() * (w - margin * 2), y: margin + rand() * (h - margin * 2) };
     if (centerClear > 0 && Math.hypot(p.x - w / 2, p.y - h / 2) < centerClear) continue;
     if (cells.every((q) => Math.hypot(q.x - p.x, q.y - p.y) >= minSep)) cells.push(p);
     else if (attempt % 700 === 699) minSep = Math.max(88, minSep * 0.9);
   }
   while (cells.length < count) {
-    cells.push({ x: margin + Math.random() * (w - margin * 2), y: margin + Math.random() * (h - margin * 2) });
+    cells.push({ x: margin + rand() * (w - margin * 2), y: margin + rand() * (h - margin * 2) });
   }
   return cells;
 }
-function rowsCells(count, w, h, margin, large) {
-  const columns = Math.max(2, Math.ceil(Math.sqrt(count * w / h)));
+function rowsCells(count, w, h, margin, large, rand) {
+  const transpose = rand() < 0.4;
+  const spanA = transpose ? h - margin * 2 : w - margin * 2;
+  const spanB = transpose ? w - margin * 2 : h - margin * 2;
+  const columns = Math.max(2, Math.ceil(Math.sqrt(count * (spanA / spanB)) + (rand() - 0.5) * 1.2));
   const rows = Math.max(2, Math.ceil(count / columns));
-  const left = margin, right = w - margin, top = margin, bottom = h - margin;
-  const rowCounts = Array.from({ length: rows }, (_, row) => Math.floor(count / rows) + (row < count % rows ? 1 : 0));
-  const jitter = large ? 52 : 16;
-  const curveAmp = large ? 24 + Math.random() * 46 : 7 + Math.random() * 12;
-  const curveFreq = 0.55 + Math.random() * 1.15;
-  const curvePhase = Math.random() * Math.PI * 2;
+  const rowCounts = shuffled(
+    Array.from({ length: rows }, (_, row) => Math.floor(count / rows) + (row < count % rows ? 1 : 0)),
+    rand
+  );
+  const jitter = large ? 62 : 20;
+  const curveAmp = large ? 28 + rand() * 58 : 9 + rand() * 15;
+  const curveFreq = 0.5 + rand() * 1.35;
+  const curvePhase = rand() * Math.PI * 2;
+  const shear = (rand() - 0.5) * (large ? 90 : 28);
   const cells = [];
   for (let row = 0; row < rows; row++) {
     const n = rowCounts[row];
-    const squeeze = 0.72 + Math.random() * 0.28;
-    const width = (right - left) * (row === 0 || row === rows - 1 ? 0.82 + Math.random() * 0.16 : squeeze);
-    const indent = (right - left - width) * (0.2 + Math.random() * 0.6);
+    if (n <= 0) continue;
+    const squeeze = 0.66 + rand() * 0.34;
+    const width = spanA * squeeze;
+    const indent = (spanA - width) * rand();
     const step = width / Math.max(1, n - 1);
+    const baseB = margin + row / Math.max(1, rows - 1) * spanB;
     for (let col = 0; col < n; col++) {
-      cells.push({
-        x: n === 1 ? w / 2 + (Math.random() - 0.5) * jitter * 2 : left + indent + col * step + (Math.random() - 0.5) * jitter,
-        y: top + row * (bottom - top) / Math.max(1, rows - 1) + Math.sin(col * curveFreq + row * 1.3 + curvePhase) * curveAmp + (Math.random() - 0.5) * jitter
-      });
+      const u = n === 1 ? 0.5 : col / (n - 1);
+      const a = n === 1 ? margin + spanA * (0.25 + rand() * 0.5) : margin + indent + col * step + (rand() - 0.5) * jitter;
+      const b = baseB + (u - 0.5) * shear + Math.sin(col * curveFreq + row * 1.4 + curvePhase) * curveAmp + (rand() - 0.5) * jitter;
+      cells.push(transpose ? { x: b, y: a } : { x: a, y: b });
     }
   }
   return cells;
 }
-function ringCells(count, w, h, margin) {
-  const cx = w / 2, cy = h / 2;
-  const maxRx = w / 2 - margin, maxRy = h / 2 - margin;
-  const rings = Math.max(1, Math.min(4, Math.ceil(count / 9)));
+function ringCells(count, w, h, margin, rand) {
+  const cx = w / 2 + (rand() - 0.5) * w * 0.06;
+  const cy = h / 2 + (rand() - 0.5) * h * 0.06;
+  const maxRx = w / 2 - margin;
+  const maxRy = h / 2 - margin;
+  const rings = Math.max(1, Math.min(4, Math.ceil(count / (7 + Math.floor(rand() * 4)))));
+  const baseAngle = rand() * Math.PI * 2;
+  const spinDir = rand() < 0.5 ? -1 : 1;
+  const arcSpan = rand() < 0.45 ? Math.PI * (1.35 + rand() * 0.4) : Math.PI * 2;
   const cells = [];
   let placed = 0;
   for (let r = 0; r < rings; r++) {
     const n = Math.ceil((count - placed) / (rings - r));
-    const radius = 0.38 + 0.58 * (rings === 1 ? 0.9 : r / Math.max(1, rings - 1));
+    const radius = 0.4 + 0.56 * (rings === 1 ? 0.88 : r / Math.max(1, rings - 1));
+    const ringOffset = baseAngle + spinDir * r * (0.7 + rand() * 0.9);
     for (let k = 0; k < n && placed < count; k++) {
-      const angle = k / n * Math.PI * 2 + r * 1.1 + (Math.random() - 0.5) * 0.55;
-      const wobble = 0.82 + Math.random() * 0.34;
+      const frac = arcSpan < Math.PI * 1.99 && n > 1 ? k / (n - 1) : k / n;
+      const angle = ringOffset + spinDir * frac * arcSpan + (rand() - 0.5) * 0.48;
+      const wobble = 0.78 + rand() * 0.38;
       cells.push({
         x: cx + Math.cos(angle) * maxRx * radius * wobble,
         y: cy + Math.sin(angle) * maxRy * radius * wobble
@@ -1013,21 +1531,24 @@ function ringCells(count, w, h, margin) {
   }
   return cells;
 }
-function clusterCells(count, w, h, margin, sep, centerClear) {
-  const nClusters = Math.max(2, Math.min(5, Math.round(count / 4) + 1));
+function clusterCells(count, w, h, margin, sep, centerClear, rand) {
+  const nClusters = Math.max(2, Math.min(5, 2 + Math.floor(rand() * 3) + (count > 18 ? 1 : 0)));
   const centers = [];
-  while (centers.length < nClusters) {
-    const p = { x: margin + Math.random() * (w - margin * 2), y: margin + Math.random() * (h - margin * 2) };
+  for (let guard = 0; guard < 800 && centers.length < nClusters; guard++) {
+    const p = { x: margin + rand() * (w - margin * 2), y: margin + rand() * (h - margin * 2) };
     if (centerClear > 0 && Math.hypot(p.x - w / 2, p.y - h / 2) < centerClear * 0.7) continue;
-    if (centers.every((q) => Math.hypot(q.x - p.x, q.y - p.y) > sep * 1.15)) centers.push(p);
+    if (centers.every((q) => Math.hypot(q.x - p.x, q.y - p.y) > sep * 1.25)) centers.push(p);
+  }
+  while (centers.length < nClusters) {
+    centers.push({ x: margin + rand() * (w - margin * 2), y: margin + rand() * (h - margin * 2) });
   }
   const cells = [];
   let minSep = sep;
   for (let attempt = 0; attempt < 6e3 && cells.length < count; attempt++) {
     const center = centers[attempt % centers.length];
-    const angle = Math.random() * Math.PI * 2;
-    const radius = Math.sqrt(Math.random()) * sep * 1.75;
-    const p = { x: center.x + Math.cos(angle) * radius, y: center.y + Math.sin(angle) * radius * 0.82 };
+    const angle = rand() * Math.PI * 2;
+    const radius = Math.sqrt(rand()) * sep * (1.4 + rand() * 0.85);
+    const p = { x: center.x + Math.cos(angle) * radius, y: center.y + Math.sin(angle) * radius * 0.84 };
     if (p.x < margin || p.x > w - margin || p.y < margin || p.y > h - margin) continue;
     if (centerClear > 0 && Math.hypot(p.x - w / 2, p.y - h / 2) < centerClear) continue;
     if (cells.every((q) => Math.hypot(q.x - p.x, q.y - p.y) >= minSep)) cells.push(p);
@@ -1035,22 +1556,25 @@ function clusterCells(count, w, h, margin, sep, centerClear) {
   }
   while (cells.length < count) {
     const center = centers[cells.length % centers.length];
-    cells.push({ x: center.x + (Math.random() - 0.5) * sep, y: center.y + (Math.random() - 0.5) * sep });
+    cells.push({ x: center.x + (rand() - 0.5) * sep, y: center.y + (rand() - 0.5) * sep });
   }
   return cells;
 }
-function valleyCells(count, w, h, margin, sep) {
-  const vertical = Math.random() < 0.5;
-  const flip = Math.random() < 0.5 ? -1 : 1;
-  const amp = h * (0.1 + Math.random() * 0.16);
-  const freq = 1 + Math.random() * 1.6;
-  const phase = Math.random() * Math.PI * 2;
+function valleyCells(count, w, h, margin, sep, rand) {
+  const vertical = rand() < 0.45;
+  const diagSlope = rand() < 0.3 ? 0 : rand() < 0.5 ? -1 : 1;
+  const waveFlip = rand() < 0.5 ? -1 : 1;
+  const amp = (vertical ? w : h) * (0.11 + rand() * 0.18);
+  const freq = 0.85 + rand() * 1.85;
+  const phase = rand() * Math.PI * 2;
   const cells = [];
   for (let i = 0; i < count; i++) {
-    const t = (i + 0.5) / count + (Math.random() - 0.5) * 0.55 / count;
+    const t = Math.max(0.02, Math.min(0.98, (i + 0.5) / count + (rand() - 0.5) * 0.65 / count));
     const along = margin + t * ((vertical ? h : w) - margin * 2);
-    const wave = Math.sin(t * Math.PI * freq + phase) * amp + (Math.random() - 0.5) * sep * 0.9;
-    const across = t * ((vertical ? w : h) - margin * 2) + margin + wave * flip;
+    const crossSpan = (vertical ? w : h) - margin * 2;
+    const baseRatio = diagSlope === 0 ? 0.5 : diagSlope > 0 ? t : 1 - t;
+    const wave = Math.sin(t * Math.PI * freq + phase) * amp * waveFlip + (rand() - 0.5) * sep * 0.85;
+    const across = margin + baseRatio * crossSpan + wave;
     const p = vertical ? { x: across, y: along } : { x: along, y: across };
     p.x = Math.max(margin, Math.min(w - margin, p.x));
     p.y = Math.max(margin, Math.min(h - margin, p.y));
@@ -1058,88 +1582,199 @@ function valleyCells(count, w, h, margin, sep) {
   }
   return cells;
 }
-function centralizeTowers(cells, towerCount, w, h) {
+function twinCells(count, w, h, margin, rand) {
+  const angle = rand() * Math.PI * 2;
+  const dx = Math.cos(angle) * (w * 0.27);
+  const dy = Math.sin(angle) * (h * 0.27);
+  const lobes = [
+    { x: w / 2 - dx, y: h / 2 - dy },
+    { x: w / 2 + dx, y: h / 2 + dy }
+  ];
+  const spreadX = w * (0.17 + rand() * 0.08);
+  const spreadY = h * (0.2 + rand() * 0.09);
+  const cells = [];
+  for (let i = 0; i < count; i++) {
+    const lobe = lobes[i % 2];
+    const a = rand() * Math.PI * 2;
+    const r = Math.sqrt(rand());
+    cells.push({
+      x: Math.max(margin, Math.min(w - margin, lobe.x + Math.cos(a) * spreadX * r)),
+      y: Math.max(margin, Math.min(h - margin, lobe.y + Math.sin(a) * spreadY * r))
+    });
+  }
+  return cells;
+}
+function spiralCells(count, w, h, margin, rand) {
+  const cx = w / 2;
+  const cy = h / 2;
+  const maxRx = w / 2 - margin;
+  const maxRy = h / 2 - margin;
+  const arms = 2 + Math.floor(rand() * 2);
+  const spin = (rand() < 0.5 ? -1 : 1) * (2.4 + rand() * 1.9);
+  const baseAngle = rand() * Math.PI * 2;
+  const cells = [];
+  for (let i = 0; i < count; i++) {
+    const arm = i % arms;
+    const u = Math.min(1, (Math.floor(i / arms) + 0.45 + (rand() - 0.5) * 0.3) / Math.max(1, Math.ceil(count / arms)));
+    const r = 0.24 + 0.74 * Math.sqrt(u);
+    const theta = baseAngle + arm / arms * Math.PI * 2 + u * spin + (rand() - 0.5) * 0.35;
+    cells.push({
+      x: cx + Math.cos(theta) * maxRx * r,
+      y: cy + Math.sin(theta) * maxRy * r
+    });
+  }
+  return cells;
+}
+function crossCells(count, w, h, margin, rand) {
+  const cx = w / 2;
+  const cy = h / 2;
+  const maxRx = w / 2 - margin;
+  const maxRy = h / 2 - margin;
+  const branches = 3 + Math.floor(rand() * 3);
+  const baseAngle = rand() * Math.PI * 2;
+  const bend = (rand() - 0.5) * 0.55;
+  const cells = [];
+  for (let i = 0; i < count; i++) {
+    const br = i % branches;
+    const rank = Math.floor(i / branches);
+    const maxRank = Math.max(1, Math.ceil(count / branches) - 1);
+    const r = 0.22 + rank / maxRank * 0.74 + (rand() - 0.5) * 0.1;
+    const theta = baseAngle + br / branches * Math.PI * 2 + r * bend + (rand() - 0.5) * 0.28;
+    cells.push({
+      x: Math.max(margin, Math.min(w - margin, cx + Math.cos(theta) * maxRx * r)),
+      y: Math.max(margin, Math.min(h - margin, cy + Math.sin(theta) * maxRy * r))
+    });
+  }
+  return cells;
+}
+function centralizeTowers(cells, towerCount, w, h, rand) {
   if (towerCount <= 0) return [];
   const ranked = cells.map((p, index) => ({
     index,
     distance: ((p.x - w / 2) / w) ** 2 + ((p.y - h / 2) / h) ** 2
   })).sort((a, b) => a.distance - b.distance).slice(0, towerCount);
-  for (const { index } of ranked) {
+  const baseAngle = rand() * Math.PI * 2;
+  ranked.forEach(({ index }, k) => {
     const p = cells[index];
-    for (let guard = 0; guard < 4; guard++) {
+    const targetAngle = baseAngle + k / Math.max(1, towerCount) * Math.PI * 2 + (rand() - 0.5) * 0.7;
+    const targetRadius = towerCount === 1 ? rand() * 0.11 : 0.05 + rand() * 0.11;
+    const anchorX = w / 2 + Math.cos(targetAngle) * w * targetRadius;
+    const anchorY = h / 2 + Math.sin(targetAngle) * h * targetRadius;
+    for (let guard = 0; guard < 5; guard++) {
       const distance2 = Math.hypot((p.x - w / 2) / w, (p.y - h / 2) / h);
-      if (distance2 < 0.17) break;
-      p.x += (w / 2 - p.x) * 0.34;
-      p.y += (h / 2 - p.y) * 0.34;
+      if (distance2 < 0.165) {
+        p.x = p.x * 0.45 + anchorX * 0.55;
+        p.y = p.y * 0.45 + anchorY * 0.55;
+        break;
+      }
+      p.x += (anchorX - p.x) * 0.42;
+      p.y += (anchorY - p.y) * 0.42;
+    }
+  });
+  return ranked.map((item) => item.index);
+}
+function keepTowersCentral(cells, towerIndices, w, h) {
+  for (const index of towerIndices) {
+    const p = cells[index];
+    const dx = (p.x - w / 2) / w;
+    const dy = (p.y - h / 2) / h;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 0.215) {
+      const scale = 0.205 / dist;
+      p.x = w / 2 + dx * scale * w;
+      p.y = h / 2 + dy * scale * h;
     }
   }
-  return ranked.map((item) => item.index);
 }
 function createRandomLevel(raw) {
   const config = normalizeRandomMap(raw);
   const error = validateRandomMap(config);
   if (error) throw new Error(error);
+  const { rand, seed, isMocked } = createUnpredictableRng();
   const castleTypes = [
     ...Array.from({ length: config.normal }, () => "barracks"),
     ...Array.from({ length: config.fast }, () => "speed"),
     ...Array.from({ length: config.heavy }, () => "heavy")
   ];
   const towerTypes = Array.from({ length: config.towers }, () => "tower");
-  shuffled(castleTypes);
+  shuffled(castleTypes, rand);
   const total = castleTypes.length + towerTypes.length;
   const margin = config.largeMap ? 110 : 82;
-  const spacing = Math.max(90, config.minDistance * PX_PER_METER);
+  const naturalMinSep = config.largeMap ? total <= 14 ? 156 : total <= 24 ? 126 : 94 : 96;
+  const overlapSep = Math.max(naturalMinSep, config.minDistance * PX_PER_METER);
+  const layoutSpread = Math.max(config.largeMap ? 185 : 116, overlapSep);
   const columns = Math.max(2, Math.ceil(Math.sqrt(total * CFG.W / CFG.H)));
   const rows = Math.max(2, Math.ceil(total / columns));
-  const baseW = margin * 2 + Math.max(0, columns - 1) * spacing;
-  const baseH = margin * 2 + Math.max(0, rows - 1) * spacing;
-  const worldWidth = config.largeMap ? Math.round(Math.max(1350, baseW) * (1 + Math.random() * 0.22)) : CFG.W;
-  const worldHeight = config.largeMap ? Math.round(Math.max(860, baseH) * (1 + Math.random() * 0.2)) : CFG.H;
-  const pool = total > 16 ? ["scatter", "rows"] : [...LAYOUTS];
-  const layout = pool[Math.floor(Math.random() * pool.length)];
-  const centerClear = config.towers > 0 && layout !== "rows" && layout !== "ring" ? Math.min(worldWidth, worldHeight) * 0.16 : 0;
+  const baseW = margin * 2 + Math.max(0, columns - 1) * overlapSep;
+  const baseH = margin * 2 + Math.max(0, rows - 1) * overlapSep;
+  const worldWidth = config.largeMap ? Math.round(Math.max(1320, baseW) * (0.96 + rand() * 0.34)) : CFG.W;
+  const worldHeight = config.largeMap ? Math.round(Math.max(830, baseH) * (0.96 + rand() * 0.3)) : CFG.H;
+  const basePool = total > 24 ? ["scatter", "rows", "clusters", "twin", "spiral"] : config.largeMap ? [...LAYOUTS] : ["scatter", "rows", "ring", "clusters", "twin", "cross"];
+  const freshLayouts = !isMocked ? basePool.filter((l) => !recentLayouts.includes(l)) : basePool;
+  const layoutPool = freshLayouts.length > 0 ? freshLayouts : basePool;
+  const layout = layoutPool[Math.floor(rand() * layoutPool.length)];
+  if (!isMocked) {
+    recentLayouts.push(layout);
+    if (recentLayouts.length > 3) recentLayouts.shift();
+  }
+  const centerClear = config.towers > 0 && layout !== "rows" && layout !== "ring" && layout !== "cross" ? Math.min(worldWidth, worldHeight) * 0.15 : 0;
   let cells;
-  if (layout === "rows") cells = rowsCells(total, worldWidth, worldHeight, margin, config.largeMap);
-  else if (layout === "ring") cells = ringCells(total, worldWidth, worldHeight, margin);
-  else if (layout === "clusters") cells = clusterCells(total, worldWidth, worldHeight, margin, spacing, centerClear);
-  else if (layout === "valley" && config.largeMap) cells = valleyCells(total, worldWidth, worldHeight, margin, spacing);
-  else cells = scatterCells(total, worldWidth, worldHeight, margin, spacing, centerClear);
-  const towerCells = centralizeTowers(cells, config.towers, worldWidth, worldHeight);
-  repairOverlap(cells, config.largeMap ? spacing : 96, worldWidth, worldHeight, margin);
+  if (layout === "rows") cells = rowsCells(total, worldWidth, worldHeight, margin, config.largeMap, rand);
+  else if (layout === "ring") cells = ringCells(total, worldWidth, worldHeight, margin, rand);
+  else if (layout === "clusters") cells = clusterCells(total, worldWidth, worldHeight, margin, layoutSpread, centerClear, rand);
+  else if (layout === "valley") cells = valleyCells(total, worldWidth, worldHeight, margin, layoutSpread, rand);
+  else if (layout === "twin") cells = twinCells(total, worldWidth, worldHeight, margin, rand);
+  else if (layout === "spiral") cells = spiralCells(total, worldWidth, worldHeight, margin, rand);
+  else if (layout === "cross") cells = crossCells(total, worldWidth, worldHeight, margin, rand);
+  else cells = scatterCells(total, worldWidth, worldHeight, margin, layoutSpread, centerClear, rand);
+  applySymmetryTransform(cells, worldWidth, worldHeight, margin, rand);
+  const towerCells = centralizeTowers(cells, config.towers, worldWidth, worldHeight, rand);
+  repairOverlap(cells, config.largeMap ? overlapSep : 96, worldWidth, worldHeight, margin);
+  keepTowersCentral(cells, towerCells, worldWidth, worldHeight);
+  repairOverlap(cells, config.largeMap ? Math.min(overlapSep, 90) : 86, worldWidth, worldHeight, margin);
   const towerCellSet = new Set(towerCells);
   const castleCells = cells.map((_, index) => index).filter((index) => !towerCellSet.has(index));
-  const starts = furthestStarts(castleCells.map((index) => cells[index]), config.players).map((index) => castleCells[index]);
+  const starts = furthestStarts(castleCells.map((index) => cells[index]), config.players, rand).map((index) => castleCells[index]);
   const reserved = new Set(starts);
-  const available = shuffled(castleCells.filter((index) => !reserved.has(index)));
+  const available = shuffled(castleCells.filter((index) => !reserved.has(index)), rand);
   const startTypes = castleTypes.splice(0, config.players);
   const buildings = [];
   for (let player = 0; player < config.players; player++) {
     const p = cells[starts[player]];
     buildings.push([p.x, p.y, player + 1, startTypes[player], startTypes[player] === "heavy" ? 15 : 22]);
   }
-  const neutralTypes = shuffled(castleTypes);
+  const neutralTypes = shuffled(castleTypes, rand);
   neutralTypes.forEach((type, index) => {
     const p = cells[available[index]];
-    const troops = type === "tower" ? 7 + Math.floor(Math.random() * 4) : 4 + Math.floor(Math.random() * 6);
+    const troops = type === "tower" ? 7 + Math.floor(rand() * 4) : 4 + Math.floor(rand() * 6);
     buildings.push([p.x, p.y, 0, type, troops]);
   });
   towerCells.forEach((cellIndex) => {
     const p = cells[cellIndex];
-    buildings.push([p.x, p.y, 0, "tower", 7 + Math.floor(Math.random() * 4)]);
+    buildings.push([p.x, p.y, 0, "tower", 7 + Math.floor(rand() * 4)]);
   });
+  const allThemes = Array.from({ length: THEME_COUNT }, (_, i) => i);
+  const freshThemes = !isMocked ? allThemes.filter((t) => !recentThemes.includes(t)) : allThemes;
+  const themePool = freshThemes.length > 0 ? freshThemes : allThemes;
+  const theme = themePool[Math.floor(rand() * themePool.length)];
+  if (!isMocked) {
+    recentThemes.push(theme);
+    if (recentThemes.length > 2) recentThemes.shift();
+  }
   const summary = `${config.normal} عادی، ${config.fast} سریع، ${config.heavy} سنگین و ${config.towers} برج`;
   return {
     name: "نقشهٔ رندوم",
-    ai: 0.55 + Math.random() * 0.3,
+    ai: 0.55 + rand() * 0.3,
     hint: `${config.players} بازیکن · ${summary} · ${config.lakes} خلیج · ${config.ships} کشتی و ${config.boats} قایق · چیدمان ${LAYOUT_LABEL[layout]}. قلعه‌های شروع در اطراف نقشه پخش شده‌اند؛ برج‌ها و بقیهٔ قلعه‌ها خنثی هستند.`,
     b: buildings,
     worldWidth,
     worldHeight,
     largeMap: config.largeMap,
-    theme: Math.floor(Math.random() * THEME_COUNT),
+    theme,
     lakes: config.lakes,
     ships: config.ships,
-    boats: config.boats
+    boats: config.boats,
+    seed
   };
 }
 
@@ -1213,7 +1848,7 @@ function placeVessels(g, ships, boats, shores) {
     const clear = (kind === "ship" ? 34 : 20) * scale;
     const cruise = out.length % 3 === 0;
     const drift = cruise ? kind === "ship" ? 20 : 13 : 0;
-    const keep = clear + drift;
+    const keep = clear + drift + 4;
     for (let guard = 0; guard < 260; guard++) {
       const x = margin + Math.random() * (g.worldWidth - margin * 2);
       const y = margin + Math.random() * (g.worldHeight - margin * 2);
@@ -1242,86 +1877,269 @@ function placeVessels(g, ships, boats, shores) {
   for (let i = 0; i < boats; i++) build("boat", i);
   return out;
 }
+function isOpenSea(p, islands, shores, g, clear) {
+  for (let idx = 0; idx < shores.length; idx++) {
+    const pts = shores[idx];
+    if (inside(p, pts) || distanceToPolygon(p, pts) < clear) return false;
+    const isl = islands[idx];
+    if (isl && p.y > isl.y && Math.abs(p.x - isl.x) < 190) {
+      const shifted = pts.map((q) => ({ x: q.x + 3, y: q.y + isl.depth + 8 }));
+      if (inside(p, shifted) || distanceToPolygon(p, shifted) < clear * 0.85) return false;
+    }
+  }
+  for (const [ia, ib] of g.links) {
+    if (distanceToLine(p, g.bs[ia], g.bs[ib]) < 42 + clear) return false;
+  }
+  return true;
+}
+function isSeaRouteSafe(pts, islands, shores, g, clear) {
+  if (pts.length < 2) return false;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    const seg = Math.hypot(b.x - a.x, b.y - a.y);
+    const steps = Math.max(1, Math.ceil(seg / 10));
+    for (let s = 0; s <= steps; s++) {
+      const t = s / steps;
+      if (!isOpenSea({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, islands, shores, g, clear)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+function buildVoyagers(g, count, islands, shores) {
+  if (count <= 0) return [];
+  const W = g.worldWidth;
+  const H = g.worldHeight;
+  const marginX = Math.max(380, Math.round(W * 0.48));
+  const startX = -marginX;
+  const endX = W + marginX;
+  const steps = 38;
+  const sails = ["#f3ead6", "#e8b44c", "#dfe9ef", "#f7d99c"];
+  const hulls = ["#6b4a2b", "#5c3f26", "#7a5533", "#654328"];
+  const routes = [];
+  const yCandidates = [0.5, 0.22, 0.78, 0.35, 0.65, 0.12, 0.88].map((r) => r * H);
+  const arches = [0, 58, -58, 95, -95];
+  for (const yMid of yCandidates) {
+    if (routes.length >= 2) break;
+    for (const arch of arches) {
+      const candidate = [];
+      for (let k = 0; k <= steps; k++) {
+        const u = k / steps;
+        const x = startX + u * (endX - startX);
+        const y = yMid + arch * Math.sin(Math.PI * u);
+        candidate.push({ x, y });
+      }
+      if (isSeaRouteSafe(candidate, islands, shores, g, 46) && routes.every((prev) => Math.abs(prev[Math.floor(steps / 2)].y - candidate[Math.floor(steps / 2)].y) > 95)) {
+        routes.push(candidate);
+        break;
+      }
+    }
+  }
+  const buildCoastalLane = (south, extraMargin) => {
+    const rawY = [];
+    const baseEdgeY = south ? H - 54 + extraMargin * 0.5 : 58 - extraMargin * 0.5;
+    for (let k = 0; k <= steps; k++) {
+      const u = k / steps;
+      const x = startX + u * (endX - startX);
+      let bound = baseEdgeY;
+      for (const isl of islands) {
+        const pts2 = shores.find((_, idx) => islands[idx] === isl) ?? isl.points;
+        for (const p of pts2) {
+          const dx = Math.abs(p.x - x);
+          if (dx > 135) continue;
+          const weight = Math.cos(dx / 135 * (Math.PI / 2));
+          if (south) {
+            bound = Math.max(bound, p.y + isl.depth + (48 + extraMargin) * (0.55 + 0.45 * weight));
+          } else {
+            bound = Math.min(bound, p.y - (52 + extraMargin) * (0.55 + 0.45 * weight));
+          }
+        }
+      }
+      for (const [ia, ib] of g.links) {
+        const A = g.bs[ia], B = g.bs[ib];
+        const minX = Math.min(A.x, B.x) - 90, maxX = Math.max(A.x, B.x) + 90;
+        if (x < minX || x > maxX) continue;
+        const t = Math.max(0, Math.min(1, (x - A.x) / (B.x - A.x || 1)));
+        const by = A.y + (B.y - A.y) * t;
+        if (south) bound = Math.max(bound, by + 84 + extraMargin);
+        else bound = Math.min(bound, by - 84 - extraMargin);
+      }
+      rawY.push(bound);
+    }
+    let smoothed = rawY.map((_, i) => {
+      let sum = 0, wSum = 0;
+      for (let d = -3; d <= 3; d++) {
+        const j = Math.max(0, Math.min(steps, i + d));
+        const w = 4 - Math.abs(d);
+        sum += rawY[j] * w;
+        wSum += w;
+      }
+      return sum / wSum;
+    });
+    let pts = smoothed.map((y, k) => ({ x: startX + k / steps * (endX - startX), y }));
+    for (let push = 0; push < 12 && !isSeaRouteSafe(pts, islands, shores, g, 42); push++) {
+      smoothed = smoothed.map((y) => y + (south ? 18 : -18));
+      pts = smoothed.map((y, k) => ({ x: startX + k / steps * (endX - startX), y }));
+    }
+    return pts;
+  };
+  routes.push(buildCoastalLane(true, 0));
+  routes.push(buildCoastalLane(false, 0));
+  routes.push(buildCoastalLane(true, 56));
+  const out = [];
+  const speeds = [25, 29, 22, 27];
+  const startFracs = [0.24, 0.63, 0.44, 0.81];
+  for (let i = 0; i < count; i++) {
+    const baseRoute = routes[i % routes.length];
+    const ordered = i % 2 === 0 ? baseRoute : [...baseRoute].reverse();
+    if (!isSeaRouteSafe(ordered, islands, shores, g, 38)) continue;
+    const cumLen = [0];
+    for (let k = 1; k < ordered.length; k++) {
+      cumLen.push(cumLen[k - 1] + Math.hypot(ordered[k].x - ordered[k - 1].x, ordered[k].y - ordered[k - 1].y));
+    }
+    const totalLen = cumLen[cumLen.length - 1];
+    if (totalLen < 80) continue;
+    out.push({
+      waypoints: ordered,
+      cumLen,
+      totalLen,
+      speed: speeds[i % speeds.length],
+      offset: totalLen * startFracs[i % startFracs.length],
+      scale: 0.96 + i % 3 * 0.1,
+      seed: 101 + i * 29,
+      hull: hulls[i % hulls.length],
+      sail: sails[i % sails.length]
+    });
+  }
+  return out;
+}
+function voyagerPose(v, time) {
+  const pauseGap = 90;
+  const cycle = v.totalLen + pauseGap;
+  const d = ((time * v.speed + v.offset) % cycle + cycle) % cycle;
+  if (d > v.totalLen) {
+    const last = v.waypoints[v.waypoints.length - 1];
+    const prev = v.waypoints[v.waypoints.length - 2] ?? last;
+    return { x: last.x, y: last.y, tilt: 0, dir: last.x >= prev.x ? 1 : -1, visible: false };
+  }
+  let idx = 0;
+  while (idx < v.cumLen.length - 2 && v.cumLen[idx + 1] < d) idx++;
+  const segStart = v.cumLen[idx];
+  const segLen = Math.max(1e-6, v.cumLen[idx + 1] - segStart);
+  const t = (d - segStart) / segLen;
+  const a = v.waypoints[idx];
+  const b = v.waypoints[idx + 1];
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const dir = dx >= 0 ? 1 : -1;
+  const bob = Math.sin(time * 1.45 + v.seed) * 1.7;
+  const slopeTilt = Math.max(-0.12, Math.min(0.12, dy / (Math.abs(dx) || 1) * 0.22));
+  const waveTilt = Math.sin(time * 1.05 + v.seed * 1.3) * 0.028 + slopeTilt * dir;
+  return {
+    x: a.x + dx * t,
+    y: a.y + dy * t + bob,
+    tilt: waveTilt,
+    dir,
+    visible: true
+  };
+}
 function landscapeFor(g) {
   const known = cache.get(g);
   if (known?.buildings === g.bs && known.links === g.links) return known.landscape;
   const themeIndex = g.demo ? 0 : Math.abs(g.L.theme ?? Math.floor(g.i / 10)) % THEMES.length;
   const theme = THEMES[themeIndex];
+  const mapSalt = (g.L.seed ?? 0) % 9973 * 0.37;
   const scenery = [];
   const hills = [];
   const vessels = [];
   const lakeCount = Math.max(0, Math.min(MAX_LAKES, g.L.lakes ?? 0));
-  const bayIslands = /* @__PURE__ */ new Set();
-  if (lakeCount > 0 && g.bs.length > 1) {
-    const order = g.bs.map((b) => b.id);
-    for (let i = order.length - 1; i > 0; i--) {
-      const j = Math.floor(noise2(g.i * 97 + i * 13 + 5) * (i + 1));
-      [order[i], order[j]] = [order[j], order[i]];
+  const bayOrder = g.bs.map((b) => b.id);
+  if (lakeCount > 0 && bayOrder.length > 1) {
+    for (let i = bayOrder.length - 1; i > 0; i--) {
+      const j = Math.floor(noise2(g.i * 97 + i * 13 + 5 + mapSalt) * (i + 1));
+      [bayOrder[i], bayOrder[j]] = [bayOrder[j], bayOrder[i]];
     }
-    order.slice(0, Math.min(lakeCount, order.length)).forEach((id) => bayIslands.add(id));
   }
-  const islands = g.bs.map((b) => {
+  const basePolys = /* @__PURE__ */ new Map();
+  for (const b of g.bs) {
     const nearest = Math.min(...g.bs.filter((q) => q !== b).map((q) => Math.hypot(q.x - b.x, (q.y - b.y) * 1.15)));
     const rx = Math.max(70, Math.min(190, nearest * 0.56 + 28));
     const ry = rx * 0.72;
-    let points = ring(b.x, b.y + 8, rx, ry, 10, 0.16 + noise2(b.id * 5 + g.i) * 0.25).map((p, i) => ({ x: b.x + (p.x - b.x) * (0.88 + noise2(i * 7 + b.id * 13) * 0.17), y: b.y + (p.y - b.y) * (0.88 + noise2(i * 9 + b.id * 3) * 0.17) }));
+    let points = ring(b.x, b.y + 8, rx, ry, 10, 0.16 + noise2(b.id * 5 + g.i + mapSalt) * 0.25).map((p, i) => ({ x: b.x + (p.x - b.x) * (0.88 + noise2(i * 7 + b.id * 13 + mapSalt) * 0.17), y: b.y + (p.y - b.y) * (0.88 + noise2(i * 9 + b.id * 3 + mapSalt) * 0.17) }));
     for (const other of g.bs) {
       if (other === b) continue;
       const nx = other.x - b.x, ny = (other.y - b.y) * 1.4;
       points = clip(points, nx, ny, nx * (b.x + other.x) / 2 + ny * (b.y + other.y) / 2);
     }
     points = points.map((p) => ({ x: b.x + (p.x - b.x) * 0.9, y: b.y + (p.y - b.y) * 0.9 }));
-    if (bayIslands.has(b.id)) {
-      const center = { x: b.x, y: b.y + 4 };
-      let bestVertex = -1;
-      let bestScore = -Infinity;
-      for (let i = 0; i < points.length; i++) {
-        const v = points[i];
-        const clearance = Math.hypot(v.x - center.x, v.y - center.y);
-        if (clearance < 88) continue;
-        if (g.links.some(([ia, ib]) => distanceToLine(v, g.bs[ia], g.bs[ib]) < 62)) continue;
-        if (!bayCandidate(points, center, i, 34)) continue;
-        const openness = Math.min(...g.bs.filter((q) => q !== b).map((q) => Math.hypot(q.x - v.x, (q.y - v.y) * 1.2)));
-        const score = Math.min(clearance, 190) * 0.35 + Math.min(openness, 220) * 0.65;
-        if (score > bestScore) {
-          bestScore = score;
-          bestVertex = i;
-        }
-      }
-      if (bestVertex >= 0) {
-        const v = points[bestVertex];
-        const reach = Math.hypot(v.x - center.x, v.y - center.y);
-        const clearance = Math.min(...g.links.flatMap(([ia, ib]) => {
-          const A = g.bs[ia], B = g.bs[ib];
-          const dx = B.x - A.x, dy = B.y - A.y;
-          const len2 = dx * dx + dy * dy || 1;
-          const t = Math.max(0, Math.min(1, ((v.x - A.x) * dx + (v.y - A.y) * dy) / len2));
-          return [Math.hypot(v.x - A.x - t * dx, v.y - A.y - t * dy)];
-        }).concat([999]));
-        const carve = Math.max(30, Math.min(76, Math.min(reach - 86, clearance - 20)));
-        const carved = carveBay(points, center, bestVertex, carve);
-        if (carved.length >= 6) {
-          points = carved;
-        }
+    if (points.length > 12) {
+      points = points.filter((p, i) => {
+        const next = points[(i + 1) % points.length];
+        return Math.hypot(p.x - next.x, p.y - next.y) >= 12;
+      });
+    }
+    basePolys.set(b.id, { b, rx, ry, points });
+  }
+  let baysCarved = 0;
+  for (const id of bayOrder) {
+    if (baysCarved >= lakeCount) break;
+    const entry = basePolys.get(id);
+    if (!entry) continue;
+    const { b, points } = entry;
+    const center = { x: b.x, y: b.y + 4 };
+    let bestVertex = -1;
+    let bestScore = -Infinity;
+    for (let i = 0; i < points.length; i++) {
+      const v = points[i];
+      const clearance = Math.hypot(v.x - center.x, v.y - center.y);
+      if (clearance < 84) continue;
+      if (g.links.some(([ia, ib]) => distanceToLine(v, g.bs[ia], g.bs[ib]) < 62)) continue;
+      if (!bayCandidate(points, center, i, 32)) continue;
+      const openness = Math.min(...g.bs.filter((q) => q !== b).map((q) => Math.hypot(q.x - v.x, (q.y - v.y) * 1.2)));
+      const score = Math.min(clearance, 190) * 0.35 + Math.min(openness, 220) * 0.65;
+      if (score > bestScore) {
+        bestScore = score;
+        bestVertex = i;
       }
     }
-    const depth = 15 + noise2(b.id * 17 + 6) * 38 + (noise2(b.id * 29 + 3) > 0.7 ? 14 : 0);
+    if (bestVertex >= 0) {
+      const v = points[bestVertex];
+      const reach = Math.hypot(v.x - center.x, v.y - center.y);
+      const clearance = Math.min(...g.links.flatMap(([ia, ib]) => {
+        const A = g.bs[ia], B = g.bs[ib];
+        const dx = B.x - A.x, dy = B.y - A.y;
+        const len2 = dx * dx + dy * dy || 1;
+        const t = Math.max(0, Math.min(1, ((v.x - A.x) * dx + (v.y - A.y) * dy) / len2));
+        return [Math.hypot(v.x - A.x - t * dx, v.y - A.y - t * dy)];
+      }).concat([999]));
+      const carve = Math.max(30, Math.min(76, Math.min(reach - 82, clearance - 20)));
+      const carved = carveBay(points, center, bestVertex, carve);
+      if (carved.length >= 6) {
+        entry.points = carved;
+        baysCarved++;
+      }
+    }
+  }
+  const islands = g.bs.map((b) => {
+    const { rx, ry, points } = basePolys.get(b.id);
+    const depth = 15 + noise2(b.id * 17 + 6 + mapSalt) * 38 + (noise2(b.id * 29 + 3 + mapSalt) > 0.7 ? 14 : 0);
     for (let k = 0; k < 4; k++) {
-      const angle = k / 4 * Math.PI * 2 + noise2(b.id + k * 4) * 0.7;
+      const angle = k / 4 * Math.PI * 2 + noise2(b.id + k * 4 + mapSalt) * 0.7;
       const p = { x: b.x + Math.cos(angle) * rx * 0.67, y: b.y + Math.sin(angle) * ry * 0.67 };
       if (Math.hypot(p.x - b.x, (p.y - b.y) * 1.6) < 65) continue;
       if (Math.abs(p.x - b.x) < 48 && p.y > b.y - 20) continue;
       if (!inside(p, points)) continue;
       if (g.links.some(([a, z]) => distanceToLine(p, g.bs[a], g.bs[z]) < 24)) continue;
-      scenery.push({ ...p, scale: 0.65 + noise2(k * 19 + b.id) * 0.7, type: k === 3 ? "ruin" : k % 2 ? "rock" : "pine", seed: b.id * 13 + k, color: theme.tree });
+      scenery.push({ ...p, scale: 0.65 + noise2(k * 19 + b.id + mapSalt) * 0.7, type: k === 3 ? "ruin" : k % 2 ? "rock" : "pine", seed: b.id * 13 + k, color: theme.tree });
     }
-    const hillCount = rx > 120 ? noise2(b.id * 41 + 5) > 0.45 ? 2 : 1 : noise2(b.id * 41 + 5) > 0.6 ? 1 : 0;
+    const hillCount = rx > 120 ? noise2(b.id * 41 + 5 + mapSalt) > 0.45 ? 2 : 1 : noise2(b.id * 41 + 5 + mapSalt) > 0.6 ? 1 : 0;
     for (let k = 0; k < hillCount; k++) {
-      const angle = noise2(b.id * 53 + k * 7) * Math.PI * 2;
-      const reach = 0.34 + noise2(b.id * 61 + k * 3) * 0.32;
+      const angle = noise2(b.id * 53 + k * 7 + mapSalt) * Math.PI * 2;
+      const reach = 0.34 + noise2(b.id * 61 + k * 3 + mapSalt) * 0.32;
       const p = { x: b.x + Math.cos(angle) * rx * reach, y: b.y + 10 + Math.sin(angle) * ry * reach };
-      const r = 16 + noise2(b.id * 67 + k * 11) * 20;
-      const h = 8 + noise2(b.id * 71 + k * 13) * 13;
+      const r = 16 + noise2(b.id * 67 + k * 11 + mapSalt) * 20;
+      const h = 8 + noise2(b.id * 71 + k * 13 + mapSalt) * 13;
       if (!inside(p, points)) continue;
       if (Math.hypot(p.x - b.x, p.y - b.y) < 62) continue;
       if (g.links.some(([a, z]) => distanceToLine(p, g.bs[a], g.bs[z]) < 42)) continue;
@@ -1333,7 +2151,13 @@ function landscapeFor(g) {
     return { id: b.id, x: b.x, y: b.y, points, depth, theme: surface };
   }).sort((a, b) => a.y - b.y);
   const shores = islands.map((island) => island.points);
-  vessels.push(...placeVessels(g, Math.max(0, Math.min(MAX_SHIPS, g.L.ships ?? 0)), Math.max(0, Math.min(MAX_BOATS, g.L.boats ?? 0)), shores));
+  const shipSetting = g.L.ships;
+  const boatSetting = g.L.boats;
+  const localShips = Math.max(0, Math.min(MAX_SHIPS, shipSetting ?? 1));
+  const localBoats = Math.max(0, Math.min(MAX_BOATS, boatSetting ?? 2));
+  vessels.push(...placeVessels(g, localShips, localBoats, shores));
+  const voyagerCount = shipSetting === 0 ? 0 : Math.min(4, Math.max(3, shipSetting ?? 3));
+  const voyagers = buildVoyagers(g, voyagerCount, islands, shores);
   const bridges = g.links.flatMap(([a, b]) => bridgeWaterSpans(g.bs[a], g.bs[b], shores));
   const roads = [];
   for (const [ia, ib] of g.links) {
@@ -1357,7 +2181,7 @@ function landscapeFor(g) {
       cursor = Math.max(cursor, t1);
     }
   }
-  const landscape = { islands, scenery, hills, vessels, roads, bridges, theme };
+  const landscape = { islands, scenery, hills, vessels, voyagers, roads, bridges, theme };
   cache.set(g, { buildings: g.bs, links: g.links, landscape });
   return landscape;
 }
@@ -1636,9 +2460,50 @@ function paintVessel(c, v, pose) {
   c.fill();
   c.restore();
 }
+function drawVoyager(c, v, time) {
+  const pose = voyagerPose(v, time);
+  if (!pose.visible) return;
+  const s = v.scale;
+  const x = pose.x;
+  const y = pose.y;
+  const dir = pose.dir;
+  c.save();
+  c.strokeStyle = "rgba(206,250,236,.26)";
+  c.lineWidth = 1.6 * s;
+  c.beginPath();
+  c.moveTo(x - dir * 18 * s, y + 1 * s);
+  c.quadraticCurveTo(x - dir * 36 * s, y - 4 * s, x - dir * 56 * s, y - 8 * s);
+  c.moveTo(x - dir * 18 * s, y + 3 * s);
+  c.quadraticCurveTo(x - dir * 36 * s, y + 8 * s, x - dir * 56 * s, y + 12 * s);
+  c.stroke();
+  c.translate(x, y);
+  if (dir < 0) c.scale(-1, 1);
+  if (Math.abs(pose.tilt) > 1e-4) c.rotate(pose.tilt * 0.45);
+  c.translate(-x, -y);
+  paintVessel(
+    c,
+    {
+      kind: "ship",
+      x,
+      y,
+      scale: s,
+      seed: v.seed,
+      hull: v.hull,
+      sail: v.sail,
+      cruise: true,
+      driftX: 0,
+      driftY: 0,
+      spin: 1,
+      phase: 0
+    },
+    { x, y, tilt: pose.tilt, moving: true }
+  );
+  c.restore();
+}
 function drawTerrain(c, g, time) {
-  const { islands, bridges, hills, vessels } = landscapeFor(g);
+  const { islands, bridges, hills, vessels, voyagers } = landscapeFor(g);
   for (const vessel of vessels) drawVessel(c, vessel, time);
+  for (const ship of voyagers) drawVoyager(c, ship, time);
   for (const island of islands) {
     polygon(c, island.points.map((p) => ({ x: p.x + 10, y: p.y + island.depth + 5 })), "rgba(6,40,40,.22)");
     c.strokeStyle = `rgba(121,228,202,${0.12 + Math.sin(time * 1.1 + island.id) * 0.04})`;
@@ -1973,20 +2838,20 @@ function drawTowerRanges(c, g, time = 0) {
     c.lineWidth = (focus ? 3 : 2) / scale;
     c.stroke();
     c.setLineDash([]);
+    const sweepAngle = time * (g.haloSpin ?? DEFAULT_HALO_SPIN) + b.id;
+    for (let k = 0; k < 3; k++) {
+      const a0 = sweepAngle + k / 3 * Math.PI * 2;
+      const px = b.x + Math.cos(a0) * CFG.range, py = b.y + Math.sin(a0) * CFG.range;
+      const spark = c.createRadialGradient(px, py, 0, px, py, 26 / scale);
+      spark.addColorStop(0, "#ffffff" + (focus ? "aa" : active ? "77" : "66"));
+      spark.addColorStop(0.35, color + (active ? "88" : "66"));
+      spark.addColorStop(1, color + "00");
+      c.fillStyle = spark;
+      c.beginPath();
+      c.arc(px, py, 26 / scale, 0, Math.PI * 2);
+      c.fill();
+    }
     if (active) {
-      const sweepAngle = time * (g.haloSpin ?? 1.35) + b.id;
-      for (let k = 0; k < 3; k++) {
-        const a0 = sweepAngle + k / 3 * Math.PI * 2;
-        const px = b.x + Math.cos(a0) * CFG.range, py = b.y + Math.sin(a0) * CFG.range;
-        const spark = c.createRadialGradient(px, py, 0, px, py, 26 / scale);
-        spark.addColorStop(0, "#ffffff" + (focus ? "aa" : "77"));
-        spark.addColorStop(0.35, color + "88");
-        spark.addColorStop(1, color + "00");
-        c.fillStyle = spark;
-        c.beginPath();
-        c.arc(px, py, 26 / scale, 0, Math.PI * 2);
-        c.fill();
-      }
       c.fillStyle = color + (focus ? "1c" : "0e");
       c.beginPath();
       c.arc(b.x, b.y, CFG.range, 0, Math.PI * 2);
@@ -2064,10 +2929,6 @@ var Game = class {
     __publicField(this, "openRoads", true);
     /** حداقل فاصلهٔ پل بین دو قلعهٔ همسایه (پیکسل) */
     __publicField(this, "minRoadLength", 0);
-    /** اگر روشن باشد، راه‌ها کاملاً رندوم انتخاب می‌شوند. */
-    __publicField(this, "randomRoads", false);
-    /** مولد اعداد تصادفیِ قابل‌کنترل، تا نقشهٔ رندوم بازتولیدپذیر بماند. */
-    __publicField(this, "roadRandom", Math.random);
     /** تایمر کاهش هر ثانیه ۱ نیرو برای قلعه‌های فراتر از سقف */
     __publicField(this, "decayTimer", 0);
     __publicField(this, "shake", 0);
@@ -2083,9 +2944,9 @@ var Game = class {
     __publicField(this, "worldHeight", CFG.H);
     __publicField(this, "largeMap", false);
     /** سرعتِ چرخشِ نورهای دور برج (صفر = بی‌حرکت) */
-    __publicField(this, "haloSpin", 1.35);
+    __publicField(this, "haloSpin", DEFAULT_HALO_SPIN);
     /** شفافیتِ نقطه‌چینِ مسیر حمله (۰..۱) */
-    __publicField(this, "attackDash", 1);
+    __publicField(this, "attackDash", DEFAULT_ATTACK_DASH);
     /** مقیاسِ اندازهٔ کوه‌های دریایی (از تنظیماتِ سراسری) — فقط ظاهر */
     /** ارتفاعِ نوارِ بالای صفحه (پیکسل) که نقشه نباید زیرش برود */
     __publicField(this, "hudInset", 0);
@@ -2177,12 +3038,7 @@ var Game = class {
     for (const [a, b, d] of pairs) {
       if (d < minLength) continue;
       if (this.links.length >= linkCap) break;
-      if (this.randomRoads) {
-        if (this.roadRandom() < 0.3 && this.links.length < linkCap) {
-          this.links.push([a, b]);
-          u[f(a)] = f(b);
-        }
-      } else if (f(a) !== f(b)) {
+      if (f(a) !== f(b)) {
         u[f(a)] = f(b);
         this.links.push([a, b]);
       } else if (!this.largeMap && d < 300) {
@@ -2262,11 +3118,10 @@ var Game = class {
    * زده می‌شد و هر تغییرِ تنظیمات کلِ نبرد را از صفر می‌کرد.)
    */
   setRoadRules(options) {
-    const before = { openRoads: this.openRoads, minRoadLength: this.minRoadLength, randomRoads: this.randomRoads };
+    const before = { openRoads: this.openRoads, minRoadLength: this.minRoadLength };
     if (options.openRoads !== void 0) this.openRoads = options.openRoads;
     if (options.minRoadLength !== void 0) this.minRoadLength = Math.max(0, Math.min(900, Math.floor(options.minRoadLength)));
-    if (options.randomRoads !== void 0) this.randomRoads = options.randomRoads;
-    const changed = before.openRoads !== this.openRoads || before.minRoadLength !== this.minRoadLength || before.randomRoads !== this.randomRoads;
+    const changed = before.openRoads !== this.openRoads || before.minRoadLength !== this.minRoadLength;
     if (changed) this.rebuildRoads();
   }
   setMaxTroops(value) {
@@ -2292,7 +3147,8 @@ var Game = class {
       this.panX = 0;
       this.panY = 0;
     } else {
-      this.zoom = Math.max(1, Math.min(3, this.zoom + delta));
+      const next = Math.round((this.zoom + delta) * 100) / 100;
+      this.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, next));
     }
     this.preview = this.computePreview();
   }
@@ -2401,30 +3257,30 @@ var Game = class {
     }
     const m = defOf(t);
     const dv = armyPower(t.army) * m;
-    t.hit = 1;
-    this.fxAdd({ k: "ring", x: t.x, y: t.y, c: "#ffffff", l: 0.6 });
-    this.shake = Math.min(1, this.shake + 0.35);
     if (s.hp > dv + 1e-8) {
       const prev = t.o;
       t.o = s.o;
       t.army = emptyArmy();
       t.army[s.unit] = s.hp - dv;
       t.pt = 0;
-      t.fl = 1;
+      t.hit = 0.5;
+      t.fl = 0.72;
       t.lvl = 1;
       t.cap = Math.min(CFG.capStart, this.baseCap);
       t.capTimer = 0;
-      this.fxAdd({ k: "ring", x: t.x, y: t.y, c: COL[s.o], l: 0.95, r: 90 });
-      this.fxAdd({ k: "burst", x: t.x, y: t.y - 10, c: COL[s.o], l: 0.7 });
+      this.shake = Math.min(0.65, this.shake + 0.18);
+      this.fxAdd({ k: "capture", x: t.x, y: t.y, c: COL[s.o], l: 1.05, r: 86 });
       if (s.o === 1) {
         this.onToast(prev === 0 ? "ساختمان تصرف شد!" : "ساختمان دشمن گرفته شد!");
         sfx.capture();
-        playCaptureSound();
       } else if (prev === 1) {
         this.onToast("یک ساختمان را از دست دادی!");
         sfx.lose();
       }
     } else {
+      t.hit = 0.85;
+      this.shake = Math.min(0.8, this.shake + 0.24);
+      this.fxAdd({ k: "ring", x: t.x, y: t.y + 8, c: "#ffffff", l: 0.5, r: 46 });
       const before = t.tr;
       damageArmy(t.army, s.hp / m);
       const lost = before - t.tr;
@@ -3060,7 +3916,7 @@ function drawStructure(c, b, time, focused) {
     for (const side of [-1, 1]) {
       polygon(c, [{ x: X + side * 24, y: Y - 32 }, { x: X + side * 29, y: Y - 60 }, { x: X + side * 19, y: Y - 51 }, { x: X + side * 16, y: Y - 34 }], side === -1 ? "#dfebd6" : "#8baca4");
     }
-    const bob = b.o ? Math.sin(time * 2.2 + b.id) * 2 : 0;
+    const bob = Math.sin(time * 2.2 + b.id) * 2;
     {
       const pulse = 0.5 + 0.5 * Math.sin(time * 2.4 + b.id);
       const radius = 44 + pulse * 9;
@@ -3071,8 +3927,8 @@ function drawStructure(c, b, time, focused) {
         glow.addColorStop(0.6, color + (pulse > 0.5 ? "2c" : "22"));
         glow.addColorStop(1, color + "00");
       } else {
-        glow.addColorStop(0, "#b7cdca55");
-        glow.addColorStop(0.4, "#b7cdca22");
+        glow.addColorStop(0, "#e2eef07a");
+        glow.addColorStop(0.35, "#b7cdca3d");
         glow.addColorStop(1, "#b7cdca00");
       }
       c.save();
@@ -3081,13 +3937,12 @@ function drawStructure(c, b, time, focused) {
       c.beginPath();
       c.arc(X, Y - 57, radius, 0, Math.PI * 2);
       c.fill();
-      if (b.o) {
-        c.strokeStyle = color + (pulse > 0.5 ? "4d" : "33");
-        c.lineWidth = 1.8;
-        c.beginPath();
-        c.arc(X, Y - 57, 34 + pulse * 5, 0, Math.PI * 2);
-        c.stroke();
-      }
+      const ringCol = b.o ? color : "#d0dde0";
+      c.strokeStyle = ringCol + (pulse > 0.5 ? "4d" : "30");
+      c.lineWidth = 1.8;
+      c.beginPath();
+      c.arc(X, Y - 57, 34 + pulse * 5, 0, Math.PI * 2);
+      c.stroke();
       c.restore();
     }
     crystal(c, X, Y - 38 + bob, 28, 53, b.o ? color : "#9db9b8");
@@ -3148,17 +4003,28 @@ function drawB(c, g, b, T) {
   }
   drawStructure(c, b, T, isSel || isDraft || g.hover === b);
   if (b.hit > 0) {
-    c.strokeStyle = `rgba(255,90,80,${b.hit * 0.9})`;
-    c.lineWidth = 5;
+    const h = Math.max(0, Math.min(1, b.hit));
+    const rx = 40 + (1 - h) * 16;
+    c.strokeStyle = `rgba(255,108,92,${(h * 0.72).toFixed(3)})`;
+    c.lineWidth = 2.6 * h + 0.8;
     c.beginPath();
-    c.arc(X, Y, 46 + (1 - b.hit) * 16, 0, 7);
+    c.ellipse(X, Y + 9, rx, rx * 0.5, 0, 0, Math.PI * 2);
     c.stroke();
   }
   if (b.fl > 0) {
-    c.fillStyle = `rgba(255,255,255,${b.fl * 0.65})`;
+    const fl = Math.max(0, Math.min(1, b.fl));
+    const col = COL[b.o] || "#ffffff";
+    c.save();
+    c.globalCompositeOperation = "lighter";
+    const glow = c.createRadialGradient(X, Y - 20, 4, X, Y - 20, 52);
+    glow.addColorStop(0, withAlpha("#ffffff", fl * 0.28));
+    glow.addColorStop(0.45, withAlpha(tint(col, 42), fl * 0.2));
+    glow.addColorStop(1, withAlpha(col, 0));
+    c.fillStyle = glow;
     c.beginPath();
-    c.arc(X, Y, 50, 0, 7);
+    c.arc(X, Y - 20, 52, 0, Math.PI * 2);
     c.fill();
+    c.restore();
   }
   if (isTarget && g.preview?.sources.length) drawTargetMark(c, g.preview, T, dashAlpha(g));
 }
@@ -3372,6 +4238,90 @@ function arrows(c, g, T) {
     c.restore();
   }
 }
+function drawCaptureEffect(c, f, p) {
+  const clamped = Math.max(0, Math.min(1, p));
+  const ease = 1 - Math.pow(1 - clamped, 3);
+  const fade = Math.pow(1 - clamped, 1.4);
+  const maxR = f.r || 86;
+  const bright = tint(f.c, 56);
+  const gold = "#ffe8a3";
+  const gy = f.y + 9;
+  c.save();
+  c.save();
+  c.translate(f.x, gy);
+  c.scale(1, 0.5);
+  const groundGlow = c.createRadialGradient(0, 0, 8, 0, 0, maxR);
+  groundGlow.addColorStop(0, withAlpha(bright, 0.22 * fade));
+  groundGlow.addColorStop(0.55, withAlpha(f.c, 0.16 * fade));
+  groundGlow.addColorStop(1, withAlpha(f.c, 0));
+  c.fillStyle = groundGlow;
+  c.beginPath();
+  c.arc(0, 0, maxR, 0, Math.PI * 2);
+  c.fill();
+  c.restore();
+  const rx1 = 30 + ease * (maxR - 30);
+  c.strokeStyle = withAlpha(f.c, 0.85 * fade);
+  c.lineWidth = 3 * (1 - clamped) + 0.9;
+  c.beginPath();
+  c.ellipse(f.x, gy, rx1, rx1 * 0.5, 0, 0, Math.PI * 2);
+  c.stroke();
+  if (clamped > 0.05) {
+    const p2 = Math.min(1, (clamped - 0.05) / 0.9);
+    const ease2 = 1 - Math.pow(1 - p2, 3);
+    const fade2 = Math.pow(1 - p2, 1.5);
+    const rx2 = 22 + ease2 * (maxR * 0.76 - 22);
+    c.strokeStyle = withAlpha(gold, 0.72 * fade2);
+    c.lineWidth = 1.9 * (1 - p2) + 0.6;
+    c.beginPath();
+    c.ellipse(f.x, gy, rx2, rx2 * 0.5, 0, 0, Math.PI * 2);
+    c.stroke();
+  }
+  const beamEnvelope = clamped < 0.18 ? clamped / 0.18 : Math.pow(Math.max(0, 1 - (clamped - 0.18) / 0.82), 1.85);
+  if (beamEnvelope > 5e-3) {
+    c.save();
+    c.globalCompositeOperation = "lighter";
+    c.translate(f.x, f.y - 26);
+    c.scale(0.62, 1.15);
+    const auraR = 46 + ease * 10;
+    const beam = c.createRadialGradient(0, 0, 3, 0, 0, auraR);
+    beam.addColorStop(0, withAlpha("#ffffff", 0.3 * beamEnvelope));
+    beam.addColorStop(0.4, withAlpha(bright, 0.24 * beamEnvelope));
+    beam.addColorStop(1, withAlpha(f.c, 0));
+    c.fillStyle = beam;
+    c.beginPath();
+    c.arc(0, 0, auraR, 0, Math.PI * 2);
+    c.fill();
+    c.restore();
+  }
+  const moteCount = 10;
+  for (let k = 0; k < moteCount; k++) {
+    const delay = k % 4 * 0.045;
+    if (clamped <= delay) continue;
+    const mp = Math.min(1, (clamped - delay) / (1 - delay));
+    const mEase = 1 - Math.pow(1 - mp, 2.4);
+    const mAlpha = Math.sin(Math.min(1, mp) * Math.PI) * 0.92;
+    if (mAlpha <= 0.02) continue;
+    const baseAng = k / moteCount * Math.PI * 2 + 0.35;
+    const swirl = baseAng + mEase * 0.55;
+    const orbitR = 22 + k % 3 * 7 + mEase * 12;
+    const mx = f.x + Math.cos(swirl) * orbitR;
+    const my = f.y - 8 + Math.sin(swirl) * orbitR * 0.46 - mEase * (44 + k % 3 * 13);
+    const sz = (5.2 - k % 3 * 0.75) * (1 - mp * 0.65);
+    const col = k % 2 === 0 ? bright : gold;
+    c.globalAlpha = mAlpha;
+    polygon(
+      c,
+      [
+        { x: mx, y: my - sz * 1.35 },
+        { x: mx + sz * 0.85, y: my },
+        { x: mx, y: my + sz * 1.35 },
+        { x: mx - sz * 0.85, y: my }
+      ],
+      col
+    );
+  }
+  c.restore();
+}
 function withAlpha(hex, a) {
   const h = hex.replace("#", "");
   const n = parseInt(h.length === 3 ? h.split("").map((x) => x + x).join("") : h, 16);
@@ -3484,7 +4434,11 @@ function render(c, g, T, W, H, dpr) {
   ];
   drawables.sort((a, b) => a.y - b.y).forEach((item) => item.draw());
   for (const f of g.fx) {
-    const p = f.t / f.l;
+    const p = Math.max(0, Math.min(1, f.t / f.l));
+    if (f.k === "capture") {
+      drawCaptureEffect(c, f, p);
+      continue;
+    }
     c.globalAlpha = Math.max(0, 1 - p);
     if (f.k === "txt") {
       c.font = "900 22px " + F_BODY;
@@ -3496,21 +4450,34 @@ function render(c, g, T, W, H, dpr) {
       c.fillStyle = f.c;
       c.fillText(f.s || "", f.x, f.y - p * 36);
     } else if (f.k === "burst") {
-      const R = (f.r || 40) * (0.3 + p);
-      c.strokeStyle = f.c;
-      c.lineWidth = 4 * (1 - p) + 1;
+      const ease = 1 - Math.pow(1 - p, 2.5);
+      const R = (f.r || 40) * (0.25 + ease * 0.85);
       for (let k = 0; k < 8; k++) {
-        const a = k / 8 * Math.PI * 2 + p * 1.4;
-        c.beginPath();
-        c.moveTo(f.x + Math.cos(a) * R * 0.35, f.y + Math.sin(a) * R * 0.35);
-        c.lineTo(f.x + Math.cos(a) * R, f.y + Math.sin(a) * R);
-        c.stroke();
+        const a = k / 8 * Math.PI * 2 + ease * 0.6;
+        const r0 = R * 0.32;
+        const r1 = R * (0.9 + k % 2 * 0.14);
+        const mid = (r0 + r1) * 0.5;
+        const w = 2.6 * (1 - p);
+        const nx = -Math.sin(a) * w;
+        const ny = Math.cos(a) * w;
+        polygon(
+          c,
+          [
+            { x: f.x + Math.cos(a) * r0, y: f.y + Math.sin(a) * r0 },
+            { x: f.x + Math.cos(a) * mid + nx, y: f.y + Math.sin(a) * mid + ny },
+            { x: f.x + Math.cos(a) * r1, y: f.y + Math.sin(a) * r1 },
+            { x: f.x + Math.cos(a) * mid - nx, y: f.y + Math.sin(a) * mid - ny }
+          ],
+          k % 2 === 0 ? f.c : tint(f.c, 45)
+        );
       }
     } else {
+      const ease = 1 - Math.pow(1 - p, 2.6);
+      const rx = 14 + ease * (f.r || 56);
       c.strokeStyle = f.c;
-      c.lineWidth = 6 * (1 - p) + 1;
+      c.lineWidth = 3.2 * (1 - p) + 0.8;
       c.beginPath();
-      c.arc(f.x, f.y, 12 + p * (f.r || 62), 0, 7);
+      c.ellipse(f.x, f.y, rx, rx * 0.52, 0, 0, Math.PI * 2);
       c.stroke();
     }
     c.globalAlpha = 1;
@@ -3540,13 +4507,13 @@ var DEFAULT_GLOBAL_SETTINGS = {
   battleMode: "field",
   maxTroops: 50,
   openRoads: true,
-  minCastleDistance: 30,
+  minCastleDistance: 0,
   ambientSound: true,
   marchSound: true,
   unitTuning: DEFAULT_UNIT_TUNING,
   haloSpin: DEFAULT_HALO_SPIN,
   attackDash: DEFAULT_ATTACK_DASH,
-  volumes: Object.fromEntries(SFX_KEYS.map((k) => [k, 1]))
+  volumes: { ...DEFAULT_SFX_VOLUMES }
 };
 function writeJSON(key, value) {
   try {
@@ -3631,7 +4598,7 @@ function normalizeGlobalSettings(raw) {
   base.maxTroops = VALID_CAPS.includes(cap) ? cap : Number.isFinite(cap) && cap >= 1 && cap <= 1e3 ? Math.floor(cap) : 50;
   base.openRoads = base.openRoads === true;
   const dist = Number(base.minCastleDistance);
-  base.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 30;
+  base.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 0;
   base.ambientSound = base.ambientSound !== false;
   base.marchSound = base.marchSound !== false;
   base.snd = base.snd !== false;
@@ -3644,7 +4611,7 @@ function normalizeGlobalSettings(raw) {
   base.volumes = Object.fromEntries(
     SFX_KEYS.map((key) => {
       const v = Number(rawVolumes[key]);
-      return [key, Number.isFinite(v) ? Math.max(0, Math.min(1, Math.round(v * 100) / 100)) : 1];
+      return [key, Number.isFinite(v) ? Math.max(0, Math.min(1, Math.round(v * 100) / 100)) : DEFAULT_SFX_VOLUMES[key]];
     })
   );
   return base;
@@ -3690,6 +4657,7 @@ function loadMapSettings() {
     const clean2 = normalizeRandomMap(source.customMap ?? source);
     mapExtras = pickExtras(source.customMap ?? source, Object.keys(DEFAULT_RANDOM_MAP));
     delete mapExtras.mountains;
+    delete mapExtras.randomRoads;
     const merged = { ...mapExtras, ...clean2 };
     if (found.key !== MAP_KEY || JSON.stringify(merged) !== JSON.stringify(found.parsed)) {
       writeWithBackup(MAP_KEY, MAP_BACKUP, merged);
@@ -3905,12 +4873,6 @@ function importSettingsJson(text, current) {
     recognized++;
     touchedMap = true;
   }
-  const randRoadsProp = readProp(mapSource, "randomRoads", "RandomRoads");
-  if (randRoadsProp.found && typeof randRoadsProp.value === "boolean") {
-    draftMap.randomRoads = randRoadsProp.value;
-    recognized++;
-    touchedMap = true;
-  }
   if (recognized === 0) {
     return { ok: false, error: "هیچ تنظیم شناخته‌شده‌ای در این کد یا فایل پیدا نشد." };
   }
@@ -3991,9 +4953,12 @@ var defaultSettings = {
   maxTroopsCap: 50,
   customMap: DEFAULT_RANDOM_MAP,
   openRoads: true,
-  minCastleDistance: 30,
+  minCastleDistance: 0,
   ambientSound: true,
-  marchSound: true
+  marchSound: true,
+  haloSpin: DEFAULT_HALO_SPIN,
+  attackDash: DEFAULT_ATTACK_DASH,
+  volumes: { ...DEFAULT_SFX_VOLUMES }
 };
 function extractUnitTuning(raw) {
   const t = raw && typeof raw === "object" ? raw : {};
@@ -4018,7 +4983,7 @@ function normalize(input) {
   settings.customMap = normalizeRandomMap(settings.customMap);
   settings.openRoads = settings.openRoads === true;
   const dist = Number(settings.minCastleDistance);
-  settings.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 30;
+  settings.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 0;
   settings.ambientSound = settings.ambientSound !== false;
   settings.marchSound = settings.marchSound !== false;
   const tuned = extractUnitTuning(settings.troopTuning);
@@ -4083,7 +5048,10 @@ function blazorToSave(input) {
   const s = normalize(input);
   const done = Array.from({ length: 30 }, (_, idx) => s.completedLevels.includes(idx));
   const volumes2 = Object.fromEntries(
-    SFX_KEYS.map((key) => [key, Number.isFinite(Number(s.volumes?.[key])) ? Number(s.volumes[key]) : 1])
+    SFX_KEYS.map((key) => [
+      key,
+      Number.isFinite(Number(s.volumes?.[key])) ? Number(s.volumes[key]) : DEFAULT_SFX_VOLUMES[key]
+    ])
   );
   const global = normalizeGlobalSettings({
     unlocked: s.unlockedLevel,
@@ -4115,7 +5083,6 @@ function saveToBlazor(save, current) {
     customMap: save.customMap,
     openRoads: save.openRoads,
     minCastleDistance: save.minCastleDistance,
-    randomRoads: save.customMap.randomRoads,
     ambientSound: save.ambientSound,
     marchSound: save.marchSound,
     troopTuning: {
@@ -4146,6 +5113,27 @@ function copySettingsText(text) {
 }
 function downloadSettingsFile(text, filename = SETTINGS_FILE_NAME) {
   return downloadJsonFile(text, filename);
+}
+function getCustomSoundsMeta() {
+  return getCustomSfxMeta();
+}
+function previewSoundEffect(key, level = 1) {
+  if (!SFX_KEYS.includes(key)) return false;
+  return previewSfx(key, Number.isFinite(Number(level)) ? Number(level) : 1);
+}
+function stopSoundPreview() {
+  stopSfxPreview();
+}
+async function uploadCustomSound(key) {
+  if (!SFX_KEYS.includes(key)) return { ok: false, error: "کلید افکت نامعتبر است." };
+  return uploadCustomSfx(key);
+}
+async function resetCustomSound(key) {
+  if (!SFX_KEYS.includes(key)) return;
+  await resetCustomSfx(key);
+}
+async function resetAllCustomSounds() {
+  await resetAllCustomSfx();
 }
 function snapshot(s) {
   const g = s.game;
@@ -4183,7 +5171,7 @@ function snapshot(s) {
     message: performance.now() < s.messageUntil ? s.message : ""
   };
 }
-function notify(s, now, force = false) {
+function notify2(s, now, force = false) {
   if (s.stopped || s.game.demo || s.inFlight || !force && now - s.lastSent < 500) return;
   s.inFlight = true;
   s.lastSent = now;
@@ -4206,8 +5194,7 @@ function applyRules(s) {
   g.setMaxTroops(s.settings.maxTroopsCap);
   g.setRoadRules({
     openRoads: s.settings.openRoads,
-    minRoadLength: s.settings.minCastleDistance * PX_PER_METER,
-    randomRoads: s.settings.customMap.randomRoads
+    minRoadLength: s.settings.minCastleDistance * PX_PER_METER
   });
   applyUnitTuning(extractUnitTuning(s.settings.troopTuning));
   g.haloSpin = normalizeHaloSpin(s.settings.haloSpin);
@@ -4234,7 +5221,7 @@ function newGame(s, index, demo, levelOverride) {
   };
   s.game.onFinish = (win) => {
     s.win = win;
-    notify(s, performance.now(), true);
+    notify2(s, performance.now(), true);
   };
   s.game.onDemoReset = () => {
     s.resetDemo = true;
@@ -4341,9 +5328,9 @@ function initialize(canvas, callback, input) {
     if (!canPlay()) return;
     event.preventDefault();
     const rect = canvas.getBoundingClientRect();
-    const step = event.deltaY > 0 ? -0.12 : 0.12;
+    const step = event.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
     s.game.zoomAt(step, event.clientX - rect.left, event.clientY - rect.top, canvas.clientWidth, canvas.clientHeight);
-    notify(s, performance.now(), true);
+    notify2(s, performance.now(), true);
   }, { signal, passive: false });
   canvas.addEventListener("contextmenu", (event) => event.preventDefault(), { signal });
   canvas.addEventListener("keydown", (event) => {
@@ -4352,7 +5339,7 @@ function initialize(canvas, callback, input) {
       event.preventDefault();
       s.game.cancel();
       s.game.paused = !s.game.paused;
-      notify(s, performance.now(), true);
+      notify2(s, performance.now(), true);
     } else if (!s.game.paused) {
       if (event.code === "KeyA") {
         event.preventDefault();
@@ -4364,7 +5351,7 @@ function initialize(canvas, callback, input) {
     if (document.hidden && !s.game.demo && !s.game.over) {
       s.game.paused = true;
       s.game.cancel();
-      notify(s, performance.now(), true);
+      notify2(s, performance.now(), true);
     }
   }, { signal });
   window.addEventListener("resize", resize, { signal });
@@ -4385,7 +5372,7 @@ function initialize(canvas, callback, input) {
     else if (g.over) g.idle(dt * s.settings.speedMultiplier);
     if (g.ptr || g.hover) g.preview = g.computePreview();
     render(ctx2, g, now / 1e3, canvas.clientWidth, canvas.clientHeight, Math.min(2, devicePixelRatio || 1));
-    notify(s, now);
+    notify2(s, now);
     if (s.resetDemo) newGame(s, Math.floor(Math.random() * LEVELS.length), true);
     s.raf = requestAnimationFrame(frame);
   }
@@ -4406,7 +5393,10 @@ function command(canvas, action, value = 0) {
     }
     s.settings.customMap = config;
     saveMapSettings(config);
-    newGame(s, LEVELS.length, false, createRandomLevel(config));
+    newGame(s, LEVELS.length, false, createRandomLevel({ ...config, minDistance: s.settings.minCastleDistance }));
+    sfx.start();
+  } else if (action === "restart") {
+    newGame(s, g.i, false, g.i >= LEVELS.length ? g.L : void 0);
     sfx.start();
   } else if (action === "start" && typeof value === "number" && value >= 0 && value < s.settings.unlockedLevel) {
     newGame(s, value, false);
@@ -4456,11 +5446,17 @@ export {
   dispose,
   downloadSettingsFile,
   exportPortableSettings,
+  getCustomSoundsMeta,
   importPortableSettings,
   initialize,
   loadSettings,
+  previewSoundEffect,
+  resetAllCustomSounds,
+  resetCustomSound,
   saveGlobalSettings,
   saveMapSettings,
   saveSettings,
-  saveToBlazor
+  saveToBlazor,
+  stopSoundPreview,
+  uploadCustomSound
 };

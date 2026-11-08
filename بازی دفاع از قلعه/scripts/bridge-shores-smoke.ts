@@ -67,5 +67,5 @@ for (const players of [2, 3, 4]) {
     verify(new Game(LEVELS.length, false, createRandomLevel({ ...DEFAULT_RANDOM_MAP, players, normal: 30, fast: 5, heavy: 2, towers: 3 })));
   }
 }
-assert.equal(UNITS.fast.speed, 1.5, "The previous fast-soldier speed setting is preserved");
+assert.equal(UNITS.fast.speed, 1.3, "The default fast-soldier speed setting is 1.3");
 console.log("PASS: bridge spans stay off grass across all 30 campaign stages and 48 random maps.");

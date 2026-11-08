@@ -1,7 +1,21 @@
-import { applyUnitTuning, COL, LEVELS, normalizeAttackDash, normalizeHaloSpin, normalizeUnitTuning, type UnitTuningMap } from "../src/game/config";
+import { applyUnitTuning, COL, DEFAULT_ATTACK_DASH, DEFAULT_HALO_SPIN, LEVELS, normalizeAttackDash, normalizeHaloSpin, normalizeUnitTuning, ZOOM_STEP, type UnitTuningMap } from "../src/game/config";
 import { Game } from "../src/game/engine";
 import { render } from "../src/game/render";
-import { setNatureLayers, setSfxVolumes, setSound, sfx, SFX_KEYS, type SfxKey } from "../src/game/sound";
+import {
+  DEFAULT_SFX_VOLUMES,
+  getCustomSfxMeta,
+  previewSfx,
+  resetAllCustomSfx,
+  resetCustomSfx,
+  setNatureLayers,
+  setSfxVolumes,
+  setSound,
+  sfx,
+  SFX_KEYS,
+  stopSfxPreview,
+  uploadCustomSfx,
+  type SfxKey,
+} from "../src/game/sound";
 import { createRandomLevel, DEFAULT_RANDOM_MAP, normalizeRandomMap, validateRandomMap, PX_PER_METER, type RandomMapSettings } from "../src/game/map";
 import {
   copyTextToClipboard,
@@ -23,10 +37,8 @@ interface Settings {
   customMap: RandomMapSettings;
   /** every castle can reach every other castle */
   openRoads: boolean;
-  /** shortest road that may be built, in pixels */
+  /** shortest road that may be built, in meters */
   minCastleDistance: number;
-  /** roads are picked at random */
-  randomRoads: boolean;
   /** calm nature ambience */
   ambientSound: boolean;
   /** marching sound while troops travel */
@@ -83,9 +95,12 @@ const defaultSettings: Settings = {
   maxTroopsCap: 50,
   customMap: DEFAULT_RANDOM_MAP,
   openRoads: true,
-  minCastleDistance: 30,
+  minCastleDistance: 0,
   ambientSound: true,
   marchSound: true,
+  haloSpin: DEFAULT_HALO_SPIN,
+  attackDash: DEFAULT_ATTACK_DASH,
+  volumes: { ...DEFAULT_SFX_VOLUMES },
 };
 
 function extractUnitTuning(raw: unknown): UnitTuningMap {
@@ -114,7 +129,7 @@ function normalize(input: Partial<Settings> | null): Settings {
   settings.customMap = normalizeRandomMap(settings.customMap);
   settings.openRoads = settings.openRoads === true;
   const dist = Number(settings.minCastleDistance);
-  settings.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 30;
+  settings.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 0;
   settings.ambientSound = settings.ambientSound !== false;
   settings.marchSound = settings.marchSound !== false;
   const tuned = extractUnitTuning(settings.troopTuning);
@@ -188,7 +203,10 @@ export function blazorToSave(input: Partial<Settings> | null): Save {
   const s = normalize(input);
   const done = Array.from({ length: 30 }, (_, idx) => s.completedLevels.includes(idx));
   const volumes = Object.fromEntries(
-    SFX_KEYS.map((key) => [key, Number.isFinite(Number(s.volumes?.[key])) ? Number(s.volumes![key]) : 1]),
+    SFX_KEYS.map((key) => [
+      key,
+      Number.isFinite(Number(s.volumes?.[key])) ? Number(s.volumes![key]) : DEFAULT_SFX_VOLUMES[key],
+    ]),
   ) as Record<SfxKey, number>;
   const global = normalizeGlobalSettings({
     unlocked: s.unlockedLevel,
@@ -222,7 +240,6 @@ export function saveToBlazor(save: Save, current?: Partial<Settings> | null): Se
     customMap: save.customMap,
     openRoads: save.openRoads,
     minCastleDistance: save.minCastleDistance,
-    randomRoads: save.customMap.randomRoads,
     ambientSound: save.ambientSound,
     marchSound: save.marchSound,
     troopTuning: {
@@ -261,6 +278,39 @@ export function copySettingsText(text: string): Promise<boolean> {
 /** دانلودِ مستقیمِ فایلِ تنظیمات در مرورگر از سمتِ Blazor */
 export function downloadSettingsFile(text: string, filename = SETTINGS_FILE_NAME): boolean {
   return downloadJsonFile(text, filename);
+}
+
+/** فهرست افکت‌هایی که فایل صوتی سفارشی برایشان آپلود شده است */
+export function getCustomSoundsMeta(): Record<string, string> {
+  return getCustomSfxMeta() as Record<string, string>;
+}
+
+/** پخش آزمایشی یک افکت صوتی در پنجرهٔ تنظیمات Blazor */
+export function previewSoundEffect(key: string, level = 1): boolean {
+  if (!SFX_KEYS.includes(key as SfxKey)) return false;
+  return previewSfx(key as SfxKey, Number.isFinite(Number(level)) ? Number(level) : 1);
+}
+
+/** توقف پخش آزمایشی صدا */
+export function stopSoundPreview(): void {
+  stopSfxPreview();
+}
+
+/** باز کردن پنجرهٔ انتخاب فایل صوتی برای یک افکت از سمت Blazor */
+export async function uploadCustomSound(key: string): Promise<{ ok: boolean; cancelled?: boolean; name?: string; error?: string }> {
+  if (!SFX_KEYS.includes(key as SfxKey)) return { ok: false, error: "کلید افکت نامعتبر است." };
+  return uploadCustomSfx(key as SfxKey);
+}
+
+/** بازگردانی یک افکت به صدای پیش‌فرض */
+export async function resetCustomSound(key: string): Promise<void> {
+  if (!SFX_KEYS.includes(key as SfxKey)) return;
+  await resetCustomSfx(key as SfxKey);
+}
+
+/** بازگردانی همهٔ افکت‌ها به صداهای پیش‌فرض */
+export async function resetAllCustomSounds(): Promise<void> {
+  await resetAllCustomSfx();
 }
 
 function snapshot(s: Session) {
@@ -328,7 +378,6 @@ function applyRules(s: Session) {
   g.setRoadRules({
     openRoads: s.settings.openRoads,
     minRoadLength: s.settings.minCastleDistance * PX_PER_METER,
-    randomRoads: s.settings.customMap.randomRoads,
   });
   applyUnitTuning(extractUnitTuning(s.settings.troopTuning));
   g.haloSpin = normalizeHaloSpin(s.settings.haloSpin);
@@ -449,7 +498,7 @@ export function initialize(canvas: HTMLCanvasElement, callback: Callback, input:
     if (!canPlay()) return;
     event.preventDefault();
     const rect = canvas.getBoundingClientRect();
-    const step = event.deltaY > 0 ? -0.12 : 0.12;
+    const step = event.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
     s.game.zoomAt(step, event.clientX - rect.left, event.clientY - rect.top, canvas.clientWidth, canvas.clientHeight);
     notify(s, performance.now(), true);
   }, { signal, passive: false });
@@ -511,7 +560,11 @@ export function command(canvas: HTMLCanvasElement, action: string, value: number
     if (error) { s.message = error; s.messageUntil = performance.now() + 3500; return snapshot(s); }
     s.settings.customMap = config;
     saveMapSettings(config); // فقط تنظیماتِ نقشه؛ تنظیماتِ سراسری دست‌نخورده می‌ماند
-    newGame(s, LEVELS.length, false, createRandomLevel(config));
+    newGame(s, LEVELS.length, false, createRandomLevel({ ...config, minDistance: s.settings.minCastleDistance }));
+    sfx.start();
+  }
+  else if (action === "restart") {
+    newGame(s, g.i, false, g.i >= LEVELS.length ? g.L : undefined);
     sfx.start();
   }
   else if (action === "start" && typeof value === "number" && value >= 0 && value < s.settings.unlockedLevel) { newGame(s, value, false); sfx.start(); }

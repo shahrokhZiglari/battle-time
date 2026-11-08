@@ -123,9 +123,9 @@ export function drawStructure(c: Context, b: Building, time: number, focused: bo
     for (const side of [-1, 1]) {
       polygon(c, [{ x: X + side * 24, y: Y - 32 }, { x: X + side * 29, y: Y - 60 }, { x: X + side * 19, y: Y - 51 }, { x: X + side * 16, y: Y - 34 }], side === -1 ? "#dfebd6" : "#8baca4");
     }
-    const bob = b.o ? Math.sin(time * 2.2 + b.id) * 2 : 0;
+    const bob = Math.sin(time * 2.2 + b.id) * 2;
     {
-      // هالهٔ نورانی دور کریستال برج — نبض می‌زند و می‌درخشد
+      // هالهٔ نورانی دور کریستال برج — هم در برج متصرف‌شده و هم در برج خالی می‌درخشد
       const pulse = 0.5 + 0.5 * Math.sin(time * 2.4 + b.id);
       const radius = 44 + pulse * 9;
       const glow = c.createRadialGradient(X, Y - 57, 2, X, Y - 57, radius);
@@ -135,19 +135,18 @@ export function drawStructure(c: Context, b: Building, time: number, focused: bo
         glow.addColorStop(.6, color + (pulse > .5 ? "2c" : "22"));
         glow.addColorStop(1, color + "00");
       } else {
-        glow.addColorStop(0, "#b7cdca55");
-        glow.addColorStop(.4, "#b7cdca22");
+        glow.addColorStop(0, "#e2eef07a");
+        glow.addColorStop(.35, "#b7cdca3d");
         glow.addColorStop(1, "#b7cdca00");
       }
       c.save();
       c.globalCompositeOperation = "lighter";
       c.fillStyle = glow;
       c.beginPath(); c.arc(X, Y - 57, radius, 0, Math.PI * 2); c.fill();
-      if (b.o) {
-        c.strokeStyle = color + (pulse > .5 ? "4d" : "33");
-        c.lineWidth = 1.8;
-        c.beginPath(); c.arc(X, Y - 57, 34 + pulse * 5, 0, Math.PI * 2); c.stroke();
-      }
+      const ringCol = b.o ? color : "#d0dde0";
+      c.strokeStyle = ringCol + (pulse > .5 ? "4d" : "30");
+      c.lineWidth = 1.8;
+      c.beginPath(); c.arc(X, Y - 57, 34 + pulse * 5, 0, Math.PI * 2); c.stroke();
       c.restore();
     }
     crystal(c, X, Y - 38 + bob, 28, 53, b.o ? color : "#9db9b8");

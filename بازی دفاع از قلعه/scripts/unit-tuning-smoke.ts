@@ -51,19 +51,23 @@ import { Game } from "../src/game/engine";
 /* ۳) بازگرداندن به پیش‌فرض */
 {
   applyUnitTuning(DEFAULT_UNIT_TUNING);
-  assert.equal(UNITS.heavy.power, 2);
-  assert.equal(UNITS.heavy.speed, Math.round((2 / 3) * 100) / 100);
+  assert.equal(UNITS.heavy.power, 1.5);
+  assert.equal(UNITS.heavy.speed, 0.7);
+  assert.equal(UNITS.fast.power, 1);
+  assert.equal(UNITS.fast.speed, 1.3);
   assert.equal(UNITS.normal.power, 1);
+  assert.equal(UNITS.normal.speed, 0.9);
 }
 
 /* ۴) سرعتِ چرخشِ نورها */
 {
-  assert.equal(normalizeHaloSpin(undefined), 1.35);
+  assert.equal(normalizeHaloSpin(undefined), 0.1);
   assert.equal(normalizeHaloSpin(0), 0, "zero freezes the lights");
   assert.equal(normalizeHaloSpin(9), 3, "spin is capped at 3");
   assert.equal(normalizeHaloSpin(-2), 0);
   const g = new Game(0);
-  assert.equal(g.haloSpin, 1.35, "the game starts with the default spin");
+  assert.equal(g.haloSpin, 0.1, "the game starts with the default spin");
+  assert.equal(g.attackDash, 0.3, "the game starts with the default 30% attack dash");
 }
 
 console.log("PASS: troop power/speed and halo spin are configurable, clamped and applied to the live game.");

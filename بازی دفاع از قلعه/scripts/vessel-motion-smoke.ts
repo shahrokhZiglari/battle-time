@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { Game } from "../src/game/engine";
 import { LEVELS } from "../src/game/config";
-import { drawTerrain, landscapeFor, vesselPose } from "../src/game/terrain";
+import { drawTerrain, landscapeFor, vesselPose, voyagerPose } from "../src/game/terrain";
 import { DEFAULT_RANDOM_MAP, createRandomLevel, MAX_BOATS, MAX_SHIPS } from "../src/game/map";
 import { setSound } from "../src/game/sound";
 
@@ -181,6 +181,30 @@ check("بخشی هم سرِ جایشان می‌مانند", stillSeen > 0, `${s
   check("رسمِ شناورها بدونِ خطا انجام می‌شود", true);
   check("هیچ مختصاتِ نامعتبری رسم نمی‌شود", nan === 0, String(nan));
   check("کشتی و قایق واقعاً روی بوم کشیده می‌شوند", painted > 0, String(painted));
+
+  // ۵) کشتی‌های عبوری در دریا (هم در مراحل داستانی و هم در نقشهٔ رندوم) بدون برخورد با جزیره و پل عبور می‌کنند
+  const campaignGame = new Game(0);
+  const campaignLand = landscapeFor(campaignGame);
+  check("در مراحل داستانی چند کشتی از دریا عبور می‌کنند", campaignLand.voyagers.length >= 3, String(campaignLand.voyagers.length));
+  for (const v of campaignLand.voyagers) {
+    const p0 = voyagerPose(v, 0);
+    const p20 = voyagerPose(v, 20);
+    assert.ok(Math.hypot(p20.x - p0.x, p20.y - p0.y) > 200, "voyager ship crosses a large stretch of sea");
+    const clear = 34 * v.scale;
+    for (let t = 0; t <= 600; t += 1.5) {
+      const pose = voyagerPose(v, t);
+      if (!pose.visible) continue;
+      for (const pts of campaignLand.islands.map((i) => i.points)) {
+        assert.ok(!insidePoly(pose, pts), "voyager never enters island land");
+        assert.ok(edgeDistance(pose, pts) >= clear - 2, "voyager stays clear of island shores");
+      }
+      for (const [ia, ib] of campaignGame.links) {
+        assert.ok(distToLine(pose, campaignGame.bs[ia], campaignGame.bs[ib]) >= 38 + clear, "voyager never crosses a bridge");
+      }
+    }
+  }
+  const zeroShips = landscapeFor(new Game(LEVELS.length, false, createRandomLevel({ ...DEFAULT_RANDOM_MAP, ships: 0, boats: 0 })));
+  check("وقتی تعداد کشتی صفر باشد هیچ کشتی عبوری ساخته نمی‌شود", zeroShips.voyagers.length === 0);
 }
 
 console.log(bad ? `FAIL: ${bad} مورد` : "PASS: هیچ کوهی نیست؛ کشتی و قایق فقط روی آب‌اند و بخشی از آن‌ها نرم و بی‌خطر حرکت می‌کنند.");

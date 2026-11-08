@@ -57,7 +57,11 @@ class FakeAC {
     return { getChannelData: () => new Float32Array(Math.max(1, len)) };
   }
   createBufferSource() {
-    return { ...node(), buffer: null, start() {}, stop() {} };
+    return { ...node(), buffer: null, loop: false, onended: null as (() => void) | null, start() {}, stop() {} };
+  }
+  decodeAudioData(buf: ArrayBuffer) {
+    if (!buf || buf.byteLength < 4) return Promise.reject(new Error("bad audio"));
+    return Promise.resolve({ duration: 0.4, length: 17640, sampleRate: 44100, getChannelData: () => new Float32Array(17640) });
   }
   createWaveShaper() {
     count.shaper++;
@@ -66,7 +70,19 @@ class FakeAC {
 }
 (globalThis as unknown as { window: unknown }).window = { AudioContext: FakeAC };
 
-const { SFX_KEYS, SFX_LABELS, setSfxVolumes, setSound, sfx } = await import("../src/game/sound");
+const {
+  SFX_KEYS,
+  SFX_LABELS,
+  getCustomSfxMeta,
+  hasCustomSfx,
+  previewSfx,
+  resetCustomSfx,
+  setCustomSfxFromBytes,
+  setSfxVolumes,
+  setSound,
+  sfx,
+  stopSfxPreview,
+} = await import("../src/game/sound");
 const { natureLayerVolume } = await import("../src/game/nature-audio");
 
 setSound(true);
@@ -148,7 +164,10 @@ check("مقدارِ منفی روی ۰ بسته می‌شود", count.osc === 0 
 setSfxVolumes(undefined);
 reset();
 sfx.select();
-check("نبودِ تنظیمات یعنی بلندیِ کامل (پیش‌فرض)", Math.abs(maxGain() - 0.045) < 1e-6, String(maxGain()));
+check("نبودِ تنظیمات برای سایر صداها یعنی ۱۰۰٪ (پیش‌فرض)", Math.abs(maxGain() - 0.045) < 1e-6, String(maxGain()));
+reset();
+sfx.capture();
+check("پیش‌فرضِ بلندیِ صدای «فتح» ۱۰٪ است", Math.abs(maxGain() - 0.042) < 1e-6, String(maxGain()));
 
 /* ۶) خاموشیِ کلیِ صدا */
 setSfxVolumes(Object.fromEntries(SFX_KEYS.map((k) => [k, 1])));
@@ -159,5 +178,35 @@ sfx.capture();
 check("خاموشیِ کلی (snd=false) هیچ صدایی پخش نمی‌کند", count.osc === 0 && count.gain === 0 && count.shaper === 0);
 setSound(true);
 
-console.log(bad ? `FAIL: ${bad} مورد` : "PASS: هر ۱۵ صدا/افکت بلندیِ مستقل، واقعی و ماندگار دارد.");
+/* ۷) دکمهٔ پخش آزمایشی (previewSfx) و آپلود/جایگزینی صدای سفارشی برای هر افکت */
+reset();
+check("پخش آزمایشی افکت لحظه‌ای کار می‌کند", previewSfx("shot", 0.8) === true && count.osc > 0);
+stopSfxPreview();
+
+reset();
+check("پخش آزمایشی صدای طبیعت کار می‌کند", previewSfx("ambient", 0.7) === true && count.gain > 0);
+stopSfxPreview();
+
+const fakeMp3 = new Uint8Array([0x49, 0x44, 0x33, 0x04, 1, 2, 3, 4]).buffer;
+const uploaded = await setCustomSfxFromBytes("shot", "laser.mp3", "audio/mpeg", fakeMp3);
+check("آپلود صدای سفارشی ذخیره و شناسایی می‌شود", uploaded.ok && hasCustomSfx("shot") && getCustomSfxMeta().shot === "laser.mp3");
+
+setSfxVolumes({ ...Object.fromEntries(SFX_KEYS.map((k) => [k, 1])), shot: 1 });
+reset();
+sfx.shot();
+check("پس از آپلود، به‌جای صدای سنتز، فایل سفارشی پخش می‌شود", count.osc === 0 && count.gain === 1 && Math.abs(maxGain() - 0.65) < 1e-6);
+
+setSfxVolumes({ ...Object.fromEntries(SFX_KEYS.map((k) => [k, 1])), shot: 0.5 });
+reset();
+sfx.shot();
+check("بلندیِ ۵۰٪ روی صدای سفارشی آپلودشده هم اعمال می‌شود", Math.abs(maxGain() - 0.325) < 1e-6);
+
+await resetCustomSfx("shot");
+check("بازنشانی صدای سفارشی، افکت را به صدای پیش‌فرض برمی‌گرداند", !hasCustomSfx("shot"));
+setSfxVolumes(Object.fromEntries(SFX_KEYS.map((k) => [k, 1])));
+reset();
+sfx.shot();
+check("پس از حذف فایل سفارشی، صدای اصلی دوباره پخش می‌شود", count.osc > 0);
+
+console.log(bad ? `FAIL: ${bad} مورد` : "PASS: هر ۱۵ صدا/افکت بلندیِ مستقل، دکمهٔ پخش آزمایشی و قابلیت آپلود صدای سفارشی دارد.");
 process.exit(bad ? 1 : 0);

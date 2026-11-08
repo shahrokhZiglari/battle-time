@@ -46,7 +46,7 @@ export interface Squad {
 }
 
 export interface Effect {
-  k: "txt" | "ring" | "burst";
+  k: "txt" | "ring" | "burst" | "capture";
   x: number;
   y: number;
   s?: string;
@@ -72,10 +72,17 @@ export interface Level {
   ships?: number;
   /** قایق‌های پارویی روی دریا */
   boats?: number;
+  /** بذر تصادفی یکتای نقشه برای تنوع شکل جزیره‌ها، خلیج‌ها و پوشش گیاهی */
+  seed?: number;
 }
 
 /** هماهنگ با آرایهٔ THEMES در terrain.ts — تعداد پالت‌های رنگی نقشه */
 export const THEME_COUNT = 5;
+
+/** گام بزرگ‌نمایی/کوچک‌نمایی و بازهٔ مجاز زوم (۳ مرحله عقب‌تر از ۱۰۰٪ تا ۵۵٪) */
+export const ZOOM_STEP = 0.15;
+export const MIN_ZOOM = 0.55;
+export const MAX_ZOOM = 3;
 
 export const CFG = {
   W: 1000,
@@ -96,9 +103,9 @@ export const CFG = {
 
 export const TROOP_TYPES: TroopType[] = ["normal", "fast", "heavy"];
 export const UNITS: Record<TroopType, { label: string; power: number; speed: number }> = {
-  normal: { label: "عادی", power: 1, speed: 1 },
-  fast: { label: "سریع", power: 1, speed: 1.5 },
-  heavy: { label: "سنگین", power: 2, speed: 2 / 3 },
+  normal: { label: "عادی", power: 1, speed: 0.9 },
+  fast: { label: "سریع", power: 1, speed: 1.3 },
+  heavy: { label: "سنگین", power: 1.5, speed: 0.7 },
 };
 
 /** تنظیمِ دلخواهِ هر نوع سرباز — از بخش تنظیمات قابل تغییر است */
@@ -113,9 +120,9 @@ export type UnitTuningMap = Record<TroopType, UnitTuning>;
 export const UNIT_LIMITS = { power: [0.5, 4] as [number, number], speed: [0.4, 2.5] as [number, number] };
 
 export const DEFAULT_UNIT_TUNING: UnitTuningMap = {
-  normal: { power: 1, speed: 1 },
-  fast: { power: 1, speed: 1.5 },
-  heavy: { power: 2, speed: 2 / 3 },
+  normal: { power: 1, speed: 0.9 },
+  fast: { power: 1, speed: 1.3 },
+  heavy: { power: 1.5, speed: 0.7 },
 };
 
 const clampNumber = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -147,14 +154,14 @@ export function applyUnitTuning(raw?: Partial<Record<TroopType, Partial<UnitTuni
 }
 
 /** سرعتِ چرخشِ نورهای دور برج — پیش‌فرض و بازهٔ مجاز */
-export const DEFAULT_HALO_SPIN = 1.35;
+export const DEFAULT_HALO_SPIN = 0.1;
 export const HALO_SPIN_LIMITS = [0, 3] as [number, number];
 export const normalizeHaloSpin = (v: unknown) => {
   const n = Number(v);
   return Number.isFinite(n) ? Math.round(clampNumber(n, ...HALO_SPIN_LIMITS) * 100) / 100 : DEFAULT_HALO_SPIN;
 };
 /** شفافیتِ نقطه‌چینِ مسیر حمله — پیش‌فرض و بازهٔ مجاز */
-export const DEFAULT_ATTACK_DASH = 1;
+export const DEFAULT_ATTACK_DASH = 0.3;
 export const ATTACK_DASH_LIMITS = [0, 1] as [number, number];
 export const normalizeAttackDash = (v: unknown) => {
   const n = Number(v);
@@ -209,7 +216,7 @@ const INTRO_LEVELS: Level[] = [
   {
     name: "تاکتیک",
     ai: 0.85,
-    hint: "سرباز سریع دو برابر تندتر است؛ سرباز سنگین دو برابر قدرت دارد اما با سرعت دوسوم حرکت می‌کند.",
+    hint: "سرباز سریع چابک‌تر است (سرعت ۱٫۳)؛ سرباز سنگین قدرت ۱٫۵ برابر دارد اما آرام‌تر حرکت می‌کند (سرعت ۰٫۷).",
     b: [
       [100, 300, 1, "barracks", 30],
       [300, 120, 0, "speed", 8],

@@ -1,15 +1,41 @@
-import { ReactNode, useRef, useState } from "react";
-import { LEVELS, TROOP_TYPES, UNIT_LIMITS, HALO_SPIN_LIMITS, ATTACK_DASH_LIMITS, fa } from "../game/config";
+import { ReactNode, useEffect, useRef, useState } from "react";
+import {
+  ATTACK_DASH_LIMITS,
+  DEFAULT_ATTACK_DASH,
+  DEFAULT_HALO_SPIN,
+  DEFAULT_UNIT_TUNING,
+  fa,
+  HALO_SPIN_LIMITS,
+  LEVELS,
+  TROOP_TYPES,
+  UNIT_LIMITS,
+} from "../game/config";
 import { MAX_BOATS, MAX_LAKES, MAX_SHIPS } from "../game/map";
 import {
   copyTextToClipboard,
+  DEFAULT_GLOBAL_SETTINGS,
   downloadJsonFile,
   exportSettingsJson,
   importSettingsJson,
   Save,
   SETTINGS_FILE_NAME,
 } from "../game/save";
-import { SFX_KEYS, SFX_FULL_NAMES, SFX_LABELS, type SfxKey } from "../game/sound";
+import {
+  DEFAULT_SFX_VOLUMES,
+  getCustomSfxMeta,
+  getPreviewingSfx,
+  onCustomSfxChange,
+  onPreviewSfxChange,
+  previewSfx,
+  resetAllCustomSfx,
+  resetCustomSfx,
+  SFX_FULL_NAMES,
+  SFX_KEYS,
+  SFX_LABELS,
+  stopSfxPreview,
+  uploadCustomSfx,
+  type SfxKey,
+} from "../game/sound";
 import GestureDemo from "./GestureDemo";
 import { RotateRow } from "./RotateControl";
 import type { Rotation } from "../game/view";
@@ -17,17 +43,21 @@ import type { Rotation } from "../game/view";
 export function Modal({
   children,
   wide,
+  medium,
   onScrim,
 }: {
   children: ReactNode;
   wide?: boolean;
+  medium?: boolean;
   onScrim?: () => void;
 }) {
   return (
     <div className="absolute inset-0 z-30 flex items-center justify-center p-3 sm:p-6">
       <div className="absolute inset-0 bg-abyss/72 backdrop-blur-[2px]" onClick={onScrim} />
       <div
-        className={`plate anim-rise relative max-h-full w-full overflow-y-auto thin-scroll ${wide ? "max-w-4xl" : "max-w-lg"}`}
+        className={`plate anim-rise relative max-h-full w-full overflow-y-auto thin-scroll ${
+          wide ? "max-w-4xl" : medium ? "max-w-2xl" : "max-w-lg"
+        }`}
       >
         {children}
       </div>
@@ -296,7 +326,7 @@ export function HelpPanel({ onBack, fromGame = false }: { onBack: () => void; fr
             <BuildCard
               icon="🏰"
               title="قلعهٔ عادی"
-              body="سرباز عادی با قدرت ۱ و سرعت پایه؛ هر ۲ ثانیه یک سرباز تولید می‌کند."
+              body="سرباز عادی با قدرت ۱ و سرعت پیش‌فرض ۰٫۹؛ هر ۲ ثانیه یک سرباز تولید می‌کند."
               tone="linear-gradient(180deg,#3ddc84,#12855a)"
             />
             <BuildCard
@@ -308,13 +338,13 @@ export function HelpPanel({ onBack, fromGame = false }: { onBack: () => void; fr
             <BuildCard
               icon="⚡"
               title="قلعهٔ سریع"
-              body="سرباز سریع: قدرت ۱، درست مثل عادی؛ سرعت حرکت دقیقاً ۲ برابر سرباز عادی. هر ۳ ثانیه تولید."
+              body="سرباز سریع: قدرت ۱ و سرعت پیش‌فرض ۱٫۳؛ هر ۳ ثانیه یک سرباز تولید می‌کند."
               tone="linear-gradient(180deg,#7ad7ff,#1b6f9c)"
             />
             <BuildCard
-              icon="2x"
+              icon="🛡"
               title="قلعهٔ سنگین"
-              body="سرباز سنگین: قدرت ۲ برابر و سرعت حرکت دقیقاً دوسوم سرباز عادی. هر ۳ ثانیه تولید."
+              body="سرباز سنگین: قدرت پیش‌فرض ۱٫۵ و سرعت ۰٫۷؛ هر ۳ ثانیه یک سرباز تولید می‌کند."
               tone="linear-gradient(180deg,#e0c28d,#755831)"
             />
           </div>
@@ -481,8 +511,38 @@ export function SettingsPanel({
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferText, setTransferText] = useState("");
   const [transferMsg, setTransferMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [customSfxMeta, setCustomSfxMeta] = useState<Partial<Record<SfxKey, string>>>(() => getCustomSfxMeta());
+  const [previewKey, setPreviewKey] = useState<SfxKey | null>(() => getPreviewingSfx());
+  const [sfxStatus, setSfxStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    const offCustom = onCustomSfxChange(() => setCustomSfxMeta(getCustomSfxMeta()));
+    const offPreview = onPreviewSfxChange((active) => setPreviewKey(active));
+    setCustomSfxMeta(getCustomSfxMeta());
+    return () => {
+      offCustom();
+      offPreview();
+      stopSfxPreview();
+    };
+  }, []);
+
+  const handleUploadSfx = async (key: SfxKey) => {
+    const res = await uploadCustomSfx(key);
+    if (res.cancelled) return;
+    if (res.ok) {
+      setSfxStatus({ ok: true, text: `صدای جدید «${res.name}» برای «${SFX_LABELS[key]}» ذخیره و پخش شد ✓` });
+    } else if (res.error) {
+      setSfxStatus({ ok: false, text: res.error });
+    }
+  };
+
+  const handleResetOneSfx = async (key: SfxKey) => {
+    await resetCustomSfx(key);
+    previewSfx(key, save.volumes?.[key] ?? DEFAULT_SFX_VOLUMES[key]);
+    setSfxStatus({ ok: true, text: `صدای «${SFX_LABELS[key]}» به حالت پیش‌فرض برگشت.` });
+  };
 
   const openTransfer = () => {
     setTransferText(exportSettingsJson(save));
@@ -680,7 +740,7 @@ export function SettingsPanel({
   }
 
   return (
-    <Modal onScrim={onBack}>
+    <Modal medium onScrim={onBack}>
       {/* سرِ فشرده — یک ردیفِ کوتاه تا برای محتوا جا بماند */}
       <div className="flex items-center justify-between gap-1.5 border-b border-brass/20 px-2 py-0.5">
         <div className="flex min-w-0 items-baseline gap-1.5">
@@ -708,7 +768,20 @@ export function SettingsPanel({
         <SettingCard
           title="صدا و افکت‌ها"
           right={
-            <span className="flex shrink-0 items-center gap-1">
+            <span className="flex flex-wrap shrink-0 items-center gap-1">
+              {Object.keys(customSfxMeta).length > 0 && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await resetAllCustomSfx();
+                    setSfxStatus({ ok: true, text: "همهٔ صداهای آپلودشده به صدای پیش‌فرض بازی برگشتند." });
+                  }}
+                  className="rounded border border-brass/40 bg-brass/10 px-1.5 py-[3px] text-[11px] font-bold leading-none text-brass transition-colors hover:bg-brass/20"
+                  title="حذف همهٔ صداهای آپلودشده و بازگشت به صداهای پیش‌فرض"
+                >
+                  صداهای پیش‌فرض ↺
+                </button>
+              )}
               <MiniToggle
                 label="طبیعت"
                 icon="🍃"
@@ -742,26 +815,95 @@ export function SettingsPanel({
             </span>
           }
         >
-          <div className="grid grid-cols-2 gap-x-1.5 gap-y-0">
+          {sfxStatus && (
+            <div
+              role={sfxStatus.ok ? "status" : "alert"}
+              className={`mb-1 rounded border px-2 py-0.5 text-[11.5px] font-bold ${
+                sfxStatus.ok ? "border-ally/40 bg-ally/10 text-ally" : "border-foe/40 bg-foe/10 text-foe"
+              }`}
+            >
+              {sfxStatus.text}
+            </div>
+          )}
+          <div className="grid grid-cols-1 gap-x-2 gap-y-[2px] sm:grid-cols-2">
             {SFX_KEYS.map((key, index) => {
-              const v = Math.max(0, Math.min(1, Number(save.volumes?.[key] ?? 1)));
-              // ردیفِ آخر (تعدادِ فرد) دو ستون را می‌گیرد تا هیچ خانهٔ خالیِ
-              // بی‌دلیلی در پایینِ کارت نماند.
+              const v = Math.max(0, Math.min(1, Number(save.volumes?.[key] ?? DEFAULT_SFX_VOLUMES[key])));
+              const customName = customSfxMeta[key];
+              const isPlaying = previewKey === key;
               const span = index === SFX_KEYS.length - 1 && SFX_KEYS.length % 2 === 1;
               return (
                 <div
                   key={key}
-                  className={`flex h-[20px] min-w-0 items-center justify-between gap-1 rounded bg-white/[0.03] px-1 ${span ? "col-span-2" : ""}`}
+                  className={`flex min-h-[24px] min-w-0 items-center justify-between gap-1 rounded border border-white/[0.06] bg-white/[0.03] px-1.5 py-[1px] ${span ? "sm:col-span-2" : ""}`}
                 >
-                  <span className="min-w-0 flex-1 text-[11.5px] leading-[1.3] text-ash" title={SFX_FULL_NAMES[key]}>
+                  <span
+                    className={`min-w-0 flex-1 truncate text-[11.5px] leading-[1.3] ${customName ? "font-bold text-ally" : "text-ash"}`}
+                    title={customName ? `${SFX_FULL_NAMES[key]} · صدای سفارشی: ${customName}` : SFX_FULL_NAMES[key]}
+                  >
                     {SFX_LABELS[key]}
+                    {customName ? " ★" : ""}
                   </span>
-                  <span className="flex shrink-0 items-center gap-[2px]">
+                  <span className="flex shrink-0 items-center gap-[3px]">
+                    {/* دکمهٔ پخش آزمایشی */}
+                    <button
+                      type="button"
+                      onClick={() => previewSfx(key, v)}
+                      aria-label={`پخش صدای ${SFX_LABELS[key]}`}
+                      title={isPlaying ? `توقف پخش «${SFX_LABELS[key]}»` : `پخش آزمایشی «${SFX_LABELS[key]}»`}
+                      className={`grid h-5 w-5 shrink-0 place-items-center rounded border transition-colors ${
+                        isPlaying
+                          ? "border-brass bg-brass/25 text-brass"
+                          : "border-white/15 bg-white/[0.06] text-bone hover:border-brass/60 hover:bg-brass/15 hover:text-brass"
+                      }`}
+                    >
+                      {isPlaying ? (
+                        <svg width="9" height="9" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+                          <rect x="2" y="2" width="8" height="8" rx="1.2" />
+                        </svg>
+                      ) : (
+                        <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+                          <path d="M3 1.8v8.4L10.2 6 3 1.8z" />
+                        </svg>
+                      )}
+                    </button>
+                    {/* دکمهٔ آپلود / تغییر صدای افکت */}
+                    <button
+                      type="button"
+                      onClick={() => void handleUploadSfx(key)}
+                      aria-label={`آپلود صدای جدید برای ${SFX_LABELS[key]}`}
+                      title={
+                        customName
+                          ? `تغییر صدای «${SFX_LABELS[key]}» (فایل فعلی: ${customName})`
+                          : `آپلود و جایگزینی فایل صوتی جدید برای «${SFX_LABELS[key]}»`
+                      }
+                      className={`grid h-5 w-5 shrink-0 place-items-center rounded border transition-colors ${
+                        customName
+                          ? "border-ally/65 bg-ally/18 text-ally hover:bg-ally/30"
+                          : "border-white/15 bg-white/[0.06] text-ash hover:border-ally/55 hover:bg-ally/15 hover:text-bone"
+                      }`}
+                    >
+                      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M8 10.5V2.5M4.8 5.5 8 2.3l3.2 3.2" />
+                        <path d="M2.5 11v2a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-2" />
+                      </svg>
+                    </button>
+                    {/* دکمهٔ بازگردانی تکی به صدای پیش‌فرض (وقتی صدای سفارشی فعال است) */}
+                    {customName && (
+                      <button
+                        type="button"
+                        onClick={() => void handleResetOneSfx(key)}
+                        aria-label={`بازگردانی صدای پیش‌فرض ${SFX_LABELS[key]}`}
+                        title={`حذف فایل «${customName}» و بازگشت به صدای اصلی «${SFX_LABELS[key]}»`}
+                        className="grid h-5 w-5 shrink-0 place-items-center rounded border border-brass/45 bg-brass/12 text-[11px] font-bold leading-none text-brass transition-colors hover:bg-brass/25"
+                      >
+                        ↺
+                      </button>
+                    )}
                     <StepBtn
                       dir={-1}
                       label={`بلندی صدای ${SFX_LABELS[key]}`}
                       disabled={v <= 0.001}
-                      onClick={() => setVol(key)(v - 0.05)}
+                      onClick={() => setVol(key)(v - 0.1)}
                     />
                     <span
                       className={`w-[36px] text-center font-display text-[12px] leading-none ${v <= 0.001 ? "text-foe" : "text-bone"}`}
@@ -772,7 +914,7 @@ export function SettingsPanel({
                       dir={1}
                       label={`بلندی صدای ${SFX_LABELS[key]}`}
                       disabled={v >= 0.999}
-                      onClick={() => setVol(key)(v + 0.05)}
+                      onClick={() => setVol(key)(v + 0.1)}
                     />
                   </span>
                 </div>
@@ -843,7 +985,36 @@ export function SettingsPanel({
         </SettingCard>
 
         {/* ---- نیروها: قدرت و سرعتِ هر نوع با + و − ---- */}
-        <SettingCard title="نیروها — قدرت و سرعتِ هر سرباز">
+        <SettingCard
+          title="نیروها — قدرت و سرعتِ هر سرباز"
+          right={
+            <button
+              type="button"
+              onClick={() => {
+                void resetAllCustomSfx();
+                onChange((prev) => ({
+                  ...prev,
+                  ...DEFAULT_GLOBAL_SETTINGS,
+                  unlocked: prev.unlocked,
+                  done: [...prev.done],
+                  unitTuning: {
+                    normal: { ...DEFAULT_UNIT_TUNING.normal },
+                    fast: { ...DEFAULT_UNIT_TUNING.fast },
+                    heavy: { ...DEFAULT_UNIT_TUNING.heavy },
+                  },
+                  haloSpin: DEFAULT_HALO_SPIN,
+                  attackDash: DEFAULT_ATTACK_DASH,
+                  volumes: { ...DEFAULT_GLOBAL_SETTINGS.volumes },
+                }));
+              }}
+              title="بازگردانی همهٔ تنظیمات و صداها به مقادیر پیش‌فرض (بدون پاک شدن مراحل)"
+              aria-label="بازنشانی تنظیمات به پیش‌فرض"
+              className="rounded border border-white/12 px-1.5 py-[2px] text-[11.5px] leading-none text-ash transition-colors hover:bg-white/10 hover:text-bone"
+            >
+              پیش‌فرض‌ها
+            </button>
+          }
+        >
           <div className="grid gap-[3px]">
             {TROOP_TYPES.map((type) => {
               const unit = save.unitTuning[type];
@@ -872,7 +1043,7 @@ export function SettingsPanel({
                         dir={-1}
                         label={`قدرتِ سرباز ${label}`}
                         disabled={unit.power <= UNIT_LIMITS.power[0] + 1e-9}
-                        onClick={() => set({ power: clampNum(unit.power - 0.05, UNIT_LIMITS.power[0], UNIT_LIMITS.power[1]) })}
+                        onClick={() => set({ power: clampNum(unit.power - 0.1, UNIT_LIMITS.power[0], UNIT_LIMITS.power[1]) })}
                       />
                       <span className="w-[32px] text-center font-display text-[12.5px] leading-none text-bone">
                         {fa(Math.round(unit.power * 100) / 100)}
@@ -881,7 +1052,7 @@ export function SettingsPanel({
                         dir={1}
                         label={`قدرتِ سرباز ${label}`}
                         disabled={unit.power >= UNIT_LIMITS.power[1] - 1e-9}
-                        onClick={() => set({ power: clampNum(unit.power + 0.05, UNIT_LIMITS.power[0], UNIT_LIMITS.power[1]) })}
+                        onClick={() => set({ power: clampNum(unit.power + 0.1, UNIT_LIMITS.power[0], UNIT_LIMITS.power[1]) })}
                       />
                     </span>
                   </span>
@@ -892,7 +1063,7 @@ export function SettingsPanel({
                         dir={-1}
                         label={`سرعتِ سرباز ${label}`}
                         disabled={unit.speed <= UNIT_LIMITS.speed[0] + 1e-9}
-                        onClick={() => set({ speed: clampNum(unit.speed - 0.05, UNIT_LIMITS.speed[0], UNIT_LIMITS.speed[1]) })}
+                        onClick={() => set({ speed: clampNum(unit.speed - 0.1, UNIT_LIMITS.speed[0], UNIT_LIMITS.speed[1]) })}
                       />
                       <span className="w-[38px] text-center font-display text-[12.5px] leading-none text-bone">
                         ×{fa(Math.round(unit.speed * 100) / 100)}
@@ -901,7 +1072,7 @@ export function SettingsPanel({
                         dir={1}
                         label={`سرعتِ سرباز ${label}`}
                         disabled={unit.speed >= UNIT_LIMITS.speed[1] - 1e-9}
-                        onClick={() => set({ speed: clampNum(unit.speed + 0.05, UNIT_LIMITS.speed[0], UNIT_LIMITS.speed[1]) })}
+                        onClick={() => set({ speed: clampNum(unit.speed + 0.1, UNIT_LIMITS.speed[0], UNIT_LIMITS.speed[1]) })}
                       />
                     </span>
                   </span>
@@ -940,7 +1111,7 @@ export function SettingsPanel({
               display={save.haloSpin <= 0.001 ? "ثابت" : "×" + fa(Math.round(save.haloSpin * 100) / 100)}
               min={HALO_SPIN_LIMITS[0]}
               max={HALO_SPIN_LIMITS[1]}
-              step={0.05}
+              step={0.1}
               onChange={(v) => onChange({ haloSpin: v })}
             />
             <StepRow
@@ -950,7 +1121,7 @@ export function SettingsPanel({
               display={pct(save.attackDash)}
               min={ATTACK_DASH_LIMITS[0]}
               max={ATTACK_DASH_LIMITS[1]}
-              step={0.05}
+              step={0.1}
               onChange={(v) => onChange({ attackDash: v })}
             />
           </div>
@@ -1102,7 +1273,6 @@ export function RandomMapPanel({
             </div>
           </div>
           <Toggle label="نقشهٔ بزرگ (زوم)" icon="🔍" checked={settings.largeMap} onChange={(v) => set({ largeMap: v })} />
-          <Toggle label="راه‌های رندوم" icon="🛤" checked={settings.randomRoads} onChange={(v) => set({ randomRoads: v })} />
           <div className="flex items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-2">
             <span className="min-w-0 truncate text-[13px] text-ash">حداقل فاصلهٔ قلعه‌ها</span>
             <span className="flex shrink-0 items-center gap-1">
@@ -1170,6 +1340,7 @@ export function RandomMapPanel({
 export function PausePanel({
   onResume,
   onRestart,
+  onNewRandomMap,
   onLevels,
   onSettings,
   onMenu,
@@ -1181,6 +1352,7 @@ export function PausePanel({
 }: {
   onResume: () => void;
   onRestart: () => void;
+  onNewRandomMap: () => void;
   onLevels: () => void;
   onSettings: () => void;
   onMenu: () => void;
@@ -1201,6 +1373,9 @@ export function PausePanel({
         <div className="mt-1 text-sm text-ash">{name}</div>
       </div>
       <div className="grid gap-2.5 px-6 py-4">
+        <Btn tone="ally" onClick={onNewRandomMap} className="w-full py-3 font-black">
+          🎲 ساخت نقشهٔ رندوم جدید
+        </Btn>
         <div className="grid grid-cols-2 gap-2.5">
           <Btn tone="steel" onClick={onRestart} className="py-3 font-bold">
             شروع دوباره
@@ -1266,6 +1441,7 @@ export function EndPanel({
   pCastles,
   onNext,
   onRestart,
+  onNewRandomMap,
   onLevels,
 }: {
   win: boolean;
@@ -1276,6 +1452,7 @@ export function EndPanel({
   pCastles: number;
   onNext: () => void;
   onRestart: () => void;
+  onNewRandomMap: () => void;
   onLevels: () => void;
 }) {
   const last = custom || index >= LEVELS.length - 1;
@@ -1323,8 +1500,11 @@ export function EndPanel({
                 مرحلهٔ بعد ←
               </Btn>
             )}
+            <Btn tone="ally" onClick={onNewRandomMap} className="py-3 font-black">
+              🎲 ساخت نقشهٔ رندوم جدید
+            </Btn>
             <Btn tone={win && !last ? "steel" : "brass"} onClick={onRestart} className="py-3 font-bold">
-              {win ? "بازی دوباره" : "تلاش دوباره"}
+              {win ? "بازی دوبارهٔ همین نقشه" : "تلاش دوباره"}
             </Btn>
             <Btn tone="ghost" onClick={onLevels} className="py-2.5 font-bold">
               فهرست مراحل

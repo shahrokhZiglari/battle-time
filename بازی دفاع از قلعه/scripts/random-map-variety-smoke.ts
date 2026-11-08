@@ -24,7 +24,14 @@ assert.ok(themes.size >= 2, `پالت رنگی نقشه‌های رندوم با
 assert.ok(maps.every((m) => (m.theme ?? 0) >= 0 && (m.theme ?? 0) < THEME_COUNT), "پالت در محدودهٔ معتبر است");
 
 const hints = new Set(maps.map((m) => m.hint));
-assert.ok(hints.size >= 3, `الگوهای چیدمان باید متنوع باشند (${hints.size} توصیف مختلف)`);
+assert.ok(hints.size >= 4, `الگوهای چیدمان باید متنوع باشند (${hints.size} توصیف مختلف)`);
+
+// هیچ دو نقشهٔ پشت‌سرهم نباید دقیقاً یک الگو یا یک پالت رنگی داشته باشند
+for (let i = 1; i < maps.length; i++) {
+  assert.notEqual(maps[i].hint, maps[i - 1].hint, "دو نقشهٔ متوالی نباید الگوی چیدمان یکسان داشته باشند");
+  assert.notEqual(maps[i].theme, maps[i - 1].theme, "دو نقشهٔ متوالی نباید پالت رنگی یکسان داشته باشند");
+  assert.notEqual(maps[i].seed, maps[i - 1].seed, "هر نقشهٔ رندوم باید بذر تصادفی یکتا داشته باشد");
+}
 
 // هر نقشه‌ای که ساخته می‌شود باید از نظر بازی سالم باشد
 let hillsSeen = 0;

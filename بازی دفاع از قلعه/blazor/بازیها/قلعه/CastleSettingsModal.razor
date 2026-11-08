@@ -46,19 +46,36 @@
                 <button type="button" class="cg-btn @(Draft.MarchSound ? "cg-gold" : "")" aria-pressed="@Draft.MarchSound" @onclick="() => Draft.MarchSound = !Draft.MarchSound">حرکت لشکر</button>
                 <button type="button" class="cg-btn @(Draft.SoundEnabled ? "cg-gold" : "")" aria-pressed="@Draft.SoundEnabled" @onclick="() => Draft.SoundEnabled = !Draft.SoundEnabled">صدا</button>
             </div>
-            <p class="cg-muted">هر صدا دکمهٔ − و + خودش را دارد. صفر یعنی خاموش. تغییر همان لحظه روی نبردِ در جریان هم اثر می‌گذارد.</p>
+            <p class="cg-muted">کنار هر صدا دکمهٔ پخش (▶) برای شنیدن جداگانه، دکمهٔ آپلود (⬆) برای جایگزینی با فایل صوتی دلخواه، و دکمهٔ − و + برای تنظیم بلندی قرار دارد.</p>
+            @if (!string.IsNullOrEmpty(SoundStatusMessage))
+            {
+                <p class="@(SoundStatusError ? "cg-foe" : "cg-ally")" role="@(SoundStatusError ? "alert" : "status")">@SoundStatusMessage</p>
+            }
             <div class="cg-volumes">
                 @foreach (var sound in SoundKeys)
                 {
+                    var hasCustom = CustomSounds.TryGetValue(sound.Key, out var customName) && !string.IsNullOrEmpty(customName);
                     <div class="cg-volume">
-                        <span>@sound.Value</span>
+                        <span class="@(hasCustom ? "cg-ally" : "")" title="@(hasCustom ? $"{sound.Value} · فایل سفارشی: {customName}" : sound.Value)">@(hasCustom ? $"{sound.Value} ★" : sound.Value)</span>
+                        <button type="button" class="cg-step cg-sfx-btn" aria-label="پخش صدای @sound.Value" title="پخش آزمایشی «@sound.Value»" @onclick="() => PreviewSoundAsync(sound.Key)">▶</button>
+                        <button type="button" class="cg-step cg-sfx-btn @(hasCustom ? "cg-sfx-custom" : "")" aria-label="آپلود صدای جدید برای @sound.Value" title="@(hasCustom ? $"تغییر فایل «{customName}»" : $"آپلود صدای جدید برای «{sound.Value}»")" @onclick="() => UploadSoundAsync(sound.Key)">⬆</button>
+                        @if (hasCustom)
+                        {
+                            <button type="button" class="cg-step cg-sfx-btn" aria-label="بازگردانی صدای پیش‌فرض @sound.Value" title="بازگشت به صدای پیش‌فرض «@sound.Value»" @onclick="() => ResetOneSoundAsync(sound.Key)">↺</button>
+                        }
                         <button type="button" class="cg-step" aria-label="کاهش @sound.Value" @onclick="() => Vol(sound.Key, -1)">−</button>
                         <b>@PercentOf(sound.Key)</b>
                         <button type="button" class="cg-step" aria-label="افزایش @sound.Value" @onclick="() => Vol(sound.Key, 1)">+</button>
                     </div>
                 }
             </div>
-            <button type="button" class="cg-btn" @onclick="ResetVolumes">همه ۱۰۰٪</button>
+            <div class="cg-choice-row" style="margin-top: 6px;">
+                <button type="button" class="cg-btn" @onclick="ResetVolumes">همه ۱۰۰٪</button>
+                @if (CustomSounds.Count > 0)
+                {
+                    <button type="button" class="cg-btn" @onclick="ResetAllCustomSoundsAsync">صداهای پیش‌فرض ↺</button>
+                }
+            </div>
         </fieldset>
         <fieldset>
             <legend>راه‌های نقشه</legend>
@@ -76,43 +93,43 @@
             <div class="cg-step-row">
                 <span>سرباز عادی — قدرت</span>
                 <button type="button" class="cg-step" aria-label="کاهش قدرت سرباز عادی" @onclick="() => Unit("normal","power",-1)">−</button>
-                <b>@Draft.TroopTuning.NormalPower.ToString("0.00")</b>
+                <b>@Draft.TroopTuning.NormalPower.ToString("0.##")</b>
                 <button type="button" class="cg-step" aria-label="افزایش قدرت سرباز عادی" @onclick="() => Unit("normal","power",1)">+</button>
             </div>
             <div class="cg-step-row">
                 <span>سرباز عادی — سرعت</span>
                 <button type="button" class="cg-step" aria-label="کاهش سرعت سرباز عادی" @onclick="() => Unit("normal","speed",-1)">−</button>
-                <b>@Draft.TroopTuning.NormalSpeed.ToString("0.00")</b>
+                <b>@Draft.TroopTuning.NormalSpeed.ToString("0.##")</b>
                 <button type="button" class="cg-step" aria-label="افزایش سرعت سرباز عادی" @onclick="() => Unit("normal","speed",1)">+</button>
             </div>
             <div class="cg-step-row">
                 <span>سرباز سریع — قدرت</span>
                 <button type="button" class="cg-step" aria-label="کاهش قدرت سرباز سریع" @onclick="() => Unit("fast","power",-1)">−</button>
-                <b>@Draft.TroopTuning.FastPower.ToString("0.00")</b>
+                <b>@Draft.TroopTuning.FastPower.ToString("0.##")</b>
                 <button type="button" class="cg-step" aria-label="افزایش قدرت سرباز سریع" @onclick="() => Unit("fast","power",1)">+</button>
             </div>
             <div class="cg-step-row">
                 <span>سرباز سریع — سرعت</span>
                 <button type="button" class="cg-step" aria-label="کاهش سرعت سرباز سریع" @onclick="() => Unit("fast","speed",-1)">−</button>
-                <b>@Draft.TroopTuning.FastSpeed.ToString("0.00")</b>
+                <b>@Draft.TroopTuning.FastSpeed.ToString("0.##")</b>
                 <button type="button" class="cg-step" aria-label="افزایش سرعت سرباز سریع" @onclick="() => Unit("fast","speed",1)">+</button>
             </div>
             <div class="cg-step-row">
                 <span>سرباز سنگین — قدرت</span>
                 <button type="button" class="cg-step" aria-label="کاهش قدرت سرباز سنگین" @onclick="() => Unit("heavy","power",-1)">−</button>
-                <b>@Draft.TroopTuning.HeavyPower.ToString("0.00")</b>
+                <b>@Draft.TroopTuning.HeavyPower.ToString("0.##")</b>
                 <button type="button" class="cg-step" aria-label="افزایش قدرت سرباز سنگین" @onclick="() => Unit("heavy","power",1)">+</button>
             </div>
             <div class="cg-step-row">
                 <span>سرباز سنگین — سرعت</span>
                 <button type="button" class="cg-step" aria-label="کاهش سرعت سرباز سنگین" @onclick="() => Unit("heavy","speed",-1)">−</button>
-                <b>@Draft.TroopTuning.HeavySpeed.ToString("0.00")</b>
+                <b>@Draft.TroopTuning.HeavySpeed.ToString("0.##")</b>
                 <button type="button" class="cg-step" aria-label="افزایش سرعت سرباز سنگین" @onclick="() => Unit("heavy","speed",1)">+</button>
             </div>
             <div class="cg-step-row">
                 <span>سرعت چرخش نورها</span>
                 <button type="button" class="cg-step" aria-label="کاهش سرعت چرخش نورها" @onclick="() => Halo(-1)">−</button>
-                <b>@(Draft.HaloSpin <= 0.001 ? "ثابت" : "×" + Draft.HaloSpin.ToString("0.00"))</b>
+                <b>@(Draft.HaloSpin <= 0.001 ? "ثابت" : "×" + Draft.HaloSpin.ToString("0.##"))</b>
                 <button type="button" class="cg-step" aria-label="افزایش سرعت چرخش نورها" @onclick="() => Halo(1)">+</button>
             </div>
             <div class="cg-step-row">
@@ -120,6 +137,9 @@
                 <button type="button" class="cg-step" aria-label="کاهش شفافیت نقطه‌چین مسیر حمله" @onclick="() => Dash(-1)">−</button>
                 <b>@((int)Math.Round(Draft.AttackDash * 100))٪</b>
                 <button type="button" class="cg-step" aria-label="افزایش شفافیت نقطه‌چین مسیر حمله" @onclick="() => Dash(1)">+</button>
+            </div>
+            <div class="cg-choice-row" style="margin-top: 8px;">
+                <button type="button" class="cg-btn" @onclick="ResetToDefaults">بازگردانی تنظیمات به پیش‌فرض</button>
             </div>
         </fieldset>
         <fieldset>
@@ -166,7 +186,6 @@
                 }
             </div>
             <button type="button" class="cg-btn @(Draft.CustomMap.LargeMap ? "cg-gold" : "")" aria-pressed="@Draft.CustomMap.LargeMap" @onclick="() => Draft.CustomMap.LargeMap = !Draft.CustomMap.LargeMap">نقشهٔ بزرگ با قابلیت زوم</button>
-            <button type="button" class="cg-btn @(Draft.CustomMap.RandomRoads ? "cg-gold" : "")" aria-pressed="@Draft.CustomMap.RandomRoads" @onclick="() => Draft.CustomMap.RandomRoads = !Draft.CustomMap.RandomRoads">راه‌ها کاملاً رندوم باشند</button>
             <div class="cg-step-row">
                 <span>قلعهٔ عادی</span>
                 <button type="button" class="cg-step" aria-label="کاهش قلعهٔ عادی" @onclick="() => MapCount("normal",-1)">−</button>
@@ -258,6 +277,87 @@
     private string TransferJson = "";
     private string? TransferMessage;
     private bool TransferError;
+    private Dictionary<string, string> CustomSounds = new(StringComparer.Ordinal);
+    private string? SoundStatusMessage;
+    private bool SoundStatusError;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || Module is null) return;
+        await RefreshCustomSoundsAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RefreshCustomSoundsAsync()
+    {
+        if (Module is null) return;
+        try
+        {
+            var meta = await Module.InvokeAsync<Dictionary<string, string>?>("getCustomSoundsMeta");
+            CustomSounds = meta ?? new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException) { }
+    }
+
+    private async Task PreviewSoundAsync(string key)
+    {
+        if (Module is null) return;
+        try { await Module.InvokeAsync<bool>("previewSoundEffect", key, Draft.VolumeOf(key)); }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException) { }
+    }
+
+    private async Task UploadSoundAsync(string key)
+    {
+        if (Module is null) return;
+        try
+        {
+            var res = await Module.InvokeAsync<CustomSoundUploadResult?>("uploadCustomSound", key);
+            if (res is null || res.Cancelled) return;
+            await RefreshCustomSoundsAsync();
+            if (res.Ok)
+            {
+                SoundStatusError = false;
+                SoundStatusMessage = $"صدای جدید «{res.Name}» ذخیره و پخش شد ✓";
+            }
+            else if (!string.IsNullOrEmpty(res.Error))
+            {
+                SoundStatusError = true;
+                SoundStatusMessage = res.Error;
+            }
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException)
+        {
+            SoundStatusError = true;
+            SoundStatusMessage = "بارگذاری فایل صوتی انجام نشد.";
+        }
+    }
+
+    private async Task ResetOneSoundAsync(string key)
+    {
+        if (Module is null) return;
+        try
+        {
+            await Module.InvokeVoidAsync("resetCustomSound", key);
+            await RefreshCustomSoundsAsync();
+            await Module.InvokeAsync<bool>("previewSoundEffect", key, Draft.VolumeOf(key));
+            SoundStatusError = false;
+            SoundStatusMessage = "صدای انتخابی به حالت پیش‌فرض برگشت.";
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException) { }
+    }
+
+    private async Task ResetAllCustomSoundsAsync()
+    {
+        if (Module is null) return;
+        try
+        {
+            await Module.InvokeVoidAsync("resetAllCustomSounds");
+            await RefreshCustomSoundsAsync();
+            SoundStatusError = false;
+            SoundStatusMessage = "همهٔ صداهای آپلودشده به حالت پیش‌فرض برگشتند.";
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException) { }
+    }
 
     private async Task CopySettingsAsync()
     {
@@ -371,32 +471,54 @@
     /// <summary>سقفِ تولید (±۱۰ سرباز)</summary>
     private void Cap(int dir) => Draft.MaxTroopsCap = Math.Clamp(Draft.MaxTroopsCap + dir * 10, 10, 1000);
 
-    /// <summary>قدرت یا سرعتِ یک نوع سرباز (±۰٫۰۵)</summary>
+    /// <summary>قدرت یا سرعتِ یک نوع سرباز (±۰٫۱)</summary>
     private void Unit(string kind, string stat, int dir)
     {
         var tuning = Draft.TroopTuning;
         if (stat == "power")
         {
-            if (kind == "normal") tuning.NormalPower = Round(tuning.NormalPower + dir * 0.05, 0.5, 4);
-            else if (kind == "fast") tuning.FastPower = Round(tuning.FastPower + dir * 0.05, 0.5, 4);
-            else tuning.HeavyPower = Round(tuning.HeavyPower + dir * 0.05, 0.5, 4);
+            if (kind == "normal") tuning.NormalPower = Round(tuning.NormalPower + dir * 0.1, 0.5, 4);
+            else if (kind == "fast") tuning.FastPower = Round(tuning.FastPower + dir * 0.1, 0.5, 4);
+            else tuning.HeavyPower = Round(tuning.HeavyPower + dir * 0.1, 0.5, 4);
         }
         else
         {
-            if (kind == "normal") tuning.NormalSpeed = Round(tuning.NormalSpeed + dir * 0.05, 0.4, 2.5);
-            else if (kind == "fast") tuning.FastSpeed = Round(tuning.FastSpeed + dir * 0.05, 0.4, 2.5);
-            else tuning.HeavySpeed = Round(tuning.HeavySpeed + dir * 0.05, 0.4, 2.5);
+            if (kind == "normal") tuning.NormalSpeed = Round(tuning.NormalSpeed + dir * 0.1, 0.4, 2.5);
+            else if (kind == "fast") tuning.FastSpeed = Round(tuning.FastSpeed + dir * 0.1, 0.4, 2.5);
+            else tuning.HeavySpeed = Round(tuning.HeavySpeed + dir * 0.1, 0.4, 2.5);
         }
     }
 
-    /// <summary>سرعتِ چرخشِ نورها (±۰٫۰۵)</summary>
-    private void Halo(int dir) => Draft.HaloSpin = Round(Draft.HaloSpin + dir * 0.05, 0, 3);
+    /// <summary>سرعتِ چرخشِ نورها (±۰٫۱)</summary>
+    private void Halo(int dir) => Draft.HaloSpin = Round(Draft.HaloSpin + dir * 0.1, 0, 3);
 
-    /// <summary>شفافیتِ نقطه‌چینِ مسیر حمله (±۰٫۰۵)</summary>
-    private void Dash(int dir) => Draft.AttackDash = Round(Draft.AttackDash + dir * 0.05, 0, 1);
+    /// <summary>شفافیتِ نقطه‌چینِ مسیر حمله (±۰٫۱)</summary>
+    private void Dash(int dir) => Draft.AttackDash = Round(Draft.AttackDash + dir * 0.1, 0, 1);
 
-    /// <summary>یک پله روی بلندیِ یک صدا (۰..۱)</summary>
-    private void Vol(string key, int dir) => Draft.SetVolume(key, Round(Draft.VolumeOf(key) + dir * 0.05, 0, 1));
+    /// <summary>یک پله روی بلندیِ یک صدا (±۰٫۱ در بازهٔ ۰..۱)</summary>
+    private void Vol(string key, int dir) => Draft.SetVolume(key, Round(Draft.VolumeOf(key) + dir * 0.1, 0, 1));
+
+    /// <summary>بازگردانیِ تنظیمات به مقادیرِ پیش‌فرض بدون پاک کردنِ مراحل بازشده</summary>
+    private async Task ResetToDefaults()
+    {
+        var defaults = new CastleSettings
+        {
+            UnlockedLevel = Draft.UnlockedLevel,
+            CompletedLevels = [.. Draft.CompletedLevels],
+            CustomMap = Draft.CustomMap.Copy(),
+        };
+        Draft = defaults;
+        if (Module is not null)
+        {
+            try
+            {
+                await Module.InvokeVoidAsync("resetAllCustomSounds");
+                await RefreshCustomSoundsAsync();
+            }
+            catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException) { }
+        }
+        if (ShowTransferBox) TransferJson = CastleSettingsTransfer.Export(Draft);
+    }
 
     /// <summary>یک پله روی شمارنده‌های نقشهٔ رندوم</summary>
     private void MapCount(string field, int dir)

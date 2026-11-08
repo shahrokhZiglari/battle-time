@@ -15,7 +15,35 @@ const mem = new Map<string, string>();
 
 const saveMod = await import("../src/game/save");
 const blazorMod = await import("./blazor-battle");
-const { SettingsPanel } = await import("../src/components/Panels");
+const { SettingsPanel, RandomMapPanel, PausePanel } = await import("../src/components/Panels");
+
+/* ۰) پیش‌فرض‌های تازه در وب و Blazor دقیقاً یکسان‌اند */
+{
+  mem.clear();
+  const freshWeb = saveMod.loadSave();
+  assert.deepEqual(freshWeb.unitTuning.normal, { power: 1, speed: 0.9 });
+  assert.deepEqual(freshWeb.unitTuning.fast, { power: 1, speed: 1.3 });
+  assert.deepEqual(freshWeb.unitTuning.heavy, { power: 1.5, speed: 0.7 });
+  assert.equal(freshWeb.haloSpin, 0.1);
+  assert.equal(freshWeb.attackDash, 0.3);
+  assert.equal(freshWeb.minCastleDistance, 0);
+  assert.equal(freshWeb.customMap.minDistance, 0);
+  assert.equal(freshWeb.volumes.capture, 0.1);
+  assert.equal(freshWeb.volumes.select, 1);
+  assert.equal("randomRoads" in freshWeb.customMap, false);
+
+  const blazorDefaults = JSON.parse(blazorMod.exportPortableSettings(null));
+  assert.deepEqual(blazorDefaults.units.normal, { power: 1, speed: 0.9 });
+  assert.deepEqual(blazorDefaults.units.fast, { power: 1, speed: 1.3 });
+  assert.deepEqual(blazorDefaults.units.heavy, { power: 1.5, speed: 0.7 });
+  assert.equal(blazorDefaults.visuals.haloSpin, 0.1);
+  assert.equal(blazorDefaults.visuals.attackDash, 0.3);
+  assert.equal(blazorDefaults.gameplay.minCastleDistance, 0);
+  assert.equal(blazorDefaults.randomMap.minDistance, 0);
+  assert.equal(blazorDefaults.sound.volumes.capture, 0.1);
+  assert.equal("randomRoads" in blazorDefaults.randomMap, false);
+}
+console.log("PASS: Default unit speeds/powers, capture=10%, distance=0m, haloSpin=0.1 and attackDash=30% match across Web & Blazor.");
 
 /* ۱) رفت‌وبرگشتِ کامل در نسخهٔ وب + حفظِ پیشرفتِ مراحل */
 {
@@ -49,7 +77,6 @@ const { SettingsPanel } = await import("../src/components/Panels");
     boats: 9,
     largeMap: false,
     minDistance: 50,
-    randomRoads: true,
   };
 
   const exported = saveMod.exportSettingsJson(source);
@@ -160,7 +187,7 @@ console.log("PASS: Web <-> Blazor bidirectional settings transfer works seamless
     assert.equal(res.save.unitTuning.heavy.power, 2.75);
     assert.equal(res.save.volumes.shot, 0.25);
     assert.equal(res.save.customMap.players, 2);
-    assert.equal(res.save.customMap.randomRoads, true);
+    assert.equal("randomRoads" in res.save.customMap, false, "legacy RandomRoads is cleanly ignored");
   }
 }
 console.log("PASS: Raw C# PascalCase JSON (even with UTF-8 BOM) imports cleanly.");
@@ -185,9 +212,11 @@ console.log("PASS: Invalid or empty JSON payloads are safely rejected with clear
 
 /* ۵) رندرِ دکمهٔ خروجی/ورودی در پنلِ تنظیمات بدون خطا */
 {
+  mem.clear();
+  const fresh = saveMod.loadSave();
   const html = renderToStaticMarkup(
     React.createElement(SettingsPanel, {
-      save: saveMod.loadSave(),
+      save: fresh,
       onChange: () => {},
       onReset: () => {},
       onBack: () => {},
@@ -195,5 +224,37 @@ console.log("PASS: Invalid or empty JSON payloads are safely rejected with clear
     }),
   );
   assert.ok(html.includes("خروجی / ورودی"), "SettingsPanel renders the transfer button");
+  assert.ok(html.includes("۱۰٪"), "SettingsPanel displays 10% capture default");
+  assert.ok(html.includes("۰ م"), "SettingsPanel displays 0m castle distance default");
+  assert.equal((html.match(/aria-label="پخش صدای /g) ?? []).length, 15, "SettingsPanel renders a Play button for all 15 sounds");
+  assert.equal((html.match(/aria-label="آپلود صدای جدید برای /g) ?? []).length, 15, "SettingsPanel renders an Upload button for all 15 sounds");
+
+  const mapHtml = renderToStaticMarkup(
+    React.createElement(RandomMapPanel, {
+      save: fresh,
+      onChange: () => {},
+      onGenerate: () => {},
+      onBack: () => {},
+    }),
+  );
+  assert.equal(mapHtml.includes("راه‌های رندوم"), false, "randomRoads toggle is removed from RandomMapPanel");
+  assert.ok(mapHtml.includes("۰ متر"), "RandomMapPanel displays 0m castle distance default");
+
+  const pauseHtml = renderToStaticMarkup(
+    React.createElement(PausePanel, {
+      name: "نقشهٔ رندوم",
+      onResume: () => {},
+      onRestart: () => {},
+      onNewRandomMap: () => {},
+      onLevels: () => {},
+      onSettings: () => {},
+      onMenu: () => {},
+      onRotate: () => {},
+      rotation: 0,
+      snd: true,
+      onSnd: () => {},
+    }),
+  );
+  assert.ok(pauseHtml.includes("ساخت نقشهٔ رندوم جدید"), "PausePanel includes the New Random Map button");
 }
-console.log("PASS: SettingsPanel renders the transfer button cleanly.");
+console.log("PASS: SettingsPanel, RandomMapPanel & PausePanel render updated defaults and New Random Map button.");

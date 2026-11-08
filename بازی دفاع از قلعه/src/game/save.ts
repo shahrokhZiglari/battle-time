@@ -1,5 +1,5 @@
 import { DEFAULT_RANDOM_MAP, normalizeRandomMap, RandomMapSettings, validateRandomMap } from "./map";
-import { SFX_KEYS, type SfxKey } from "./sound";
+import { DEFAULT_SFX_VOLUMES, SFX_KEYS, type SfxKey } from "./sound";
 import {
   applyUnitTuning,
   DEFAULT_ATTACK_DASH,
@@ -97,13 +97,13 @@ export const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   battleMode: "field",
   maxTroops: 50,
   openRoads: true,
-  minCastleDistance: 30,
+  minCastleDistance: 0,
   ambientSound: true,
   marchSound: true,
   unitTuning: DEFAULT_UNIT_TUNING,
   haloSpin: DEFAULT_HALO_SPIN,
   attackDash: DEFAULT_ATTACK_DASH,
-  volumes: Object.fromEntries(SFX_KEYS.map((k) => [k, 1])) as Record<SfxKey, number>,
+  volumes: { ...DEFAULT_SFX_VOLUMES },
 };
 
 function writeJSON(key: string, value: unknown) {
@@ -215,7 +215,7 @@ export function normalizeGlobalSettings(raw: Partial<GlobalSettings> | null | un
       : 50;
   base.openRoads = base.openRoads === true;
   const dist = Number(base.minCastleDistance);
-  base.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 30;
+  base.minCastleDistance = Number.isFinite(dist) ? Math.max(0, Math.min(120, Math.floor(dist))) : 0;
   base.ambientSound = base.ambientSound !== false;
   base.marchSound = base.marchSound !== false;
   base.snd = base.snd !== false;
@@ -224,12 +224,12 @@ export function normalizeGlobalSettings(raw: Partial<GlobalSettings> | null | un
   base.unitTuning = normalizeUnitTuning(base.unitTuning);
   base.haloSpin = normalizeHaloSpin(base.haloSpin);
   base.attackDash = normalizeAttackDash(base.attackDash);
-  // بلندیِ صداها: هر کلیدِ ناشناخته کنار گذاشته می‌شود و مقدارِ خراب به ۱ برمی‌گردد
+  // بلندیِ صداها: هر کلیدِ ناشناخته کنار گذاشته می‌شود و مقدارِ خراب به پیش‌فرضِ همان کلید برمی‌گردد
   const rawVolumes = (base.volumes && typeof base.volumes === "object" ? base.volumes : {}) as Record<string, unknown>;
   base.volumes = Object.fromEntries(
     SFX_KEYS.map((key) => {
       const v = Number(rawVolumes[key]);
-      return [key, Number.isFinite(v) ? Math.max(0, Math.min(1, Math.round(v * 100) / 100)) : 1];
+      return [key, Number.isFinite(v) ? Math.max(0, Math.min(1, Math.round(v * 100) / 100)) : DEFAULT_SFX_VOLUMES[key]];
     }),
   ) as Record<SfxKey, number>;
   return base;
@@ -297,8 +297,9 @@ export function loadMapSettings(): RandomMapSettings {
     // سازگاری: در نسخه‌های خیلی قدیمی تنظیماتِ نقشه زیرِ customMap بود
     const clean = normalizeRandomMap(source.customMap ?? source);
     mapExtras = pickExtras(source.customMap ?? source, Object.keys(DEFAULT_RANDOM_MAP));
-    // «mountains» از دورِ ۱۹ دیگر وجود ندارد؛ نگه‌داشتنش فقط دادهٔ مرده است.
+    // فیلدهای حذف‌شده (mountains و randomRoads) دیگر نگه‌داری نمی‌شوند.
     delete mapExtras.mountains;
+    delete mapExtras.randomRoads;
     const merged = { ...mapExtras, ...clean };
     if (found.key !== MAP_KEY || JSON.stringify(merged) !== JSON.stringify(found.parsed)) {
       writeWithBackup(MAP_KEY, MAP_BACKUP, merged);
@@ -618,12 +619,6 @@ export function importSettingsJson(text: string, current?: Save): SettingsImport
   const largeProp = readProp(mapSource, "largeMap", "LargeMap");
   if (largeProp.found && typeof largeProp.value === "boolean") {
     draftMap.largeMap = largeProp.value;
-    recognized++;
-    touchedMap = true;
-  }
-  const randRoadsProp = readProp(mapSource, "randomRoads", "RandomRoads");
-  if (randRoadsProp.found && typeof randRoadsProp.value === "boolean") {
-    draftMap.randomRoads = randRoadsProp.value;
     recognized++;
     touchedMap = true;
   }

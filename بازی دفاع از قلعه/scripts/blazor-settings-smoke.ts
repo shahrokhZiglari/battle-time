@@ -19,9 +19,9 @@ const LEGACY_KEY = "castle_blazor9_settings_v1";
 
 const baseSettings = {
   unlockedLevel: 1, completedLevels: [], soundEnabled: true, speedMultiplier: 1,
-  battleMode: 0 as const, maxTroopsCap: 50, openRoads: true, minCastleDistance: 30,
-  randomRoads: false, ambientSound: true, marchSound: true,
-  customMap: { players: 3, normal: 10, fast: 2, heavy: 1, towers: 2, largeMap: true, randomRoads: false, minDistance: 30, lakes: 2 },
+  battleMode: 0 as const, maxTroopsCap: 50, openRoads: true, minCastleDistance: 10,
+  ambientSound: true, marchSound: true,
+  customMap: { players: 3, normal: 10, fast: 2, heavy: 1, towers: 2, largeMap: true, minDistance: 10, lakes: 2, ships: 2, boats: 3 },
 };
 
 /* ۱) مهاجرت از کلیدِ قدیمی */

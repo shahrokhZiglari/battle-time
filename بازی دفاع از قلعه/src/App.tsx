@@ -3,7 +3,7 @@ import Hud, { HudData } from "./components/Hud";
 import { EndPanel, HelpPanel, LevelsPanel, MenuPanel, PausePanel, RandomMapPanel, SettingsPanel } from "./components/Panels";
 import { RotateFab } from "./components/RotateControl";
 import { PanelBoundary } from "./components/PanelBoundary";
-import { applyUnitTuning, COL, LEVELS, fa } from "./game/config";
+import { applyUnitTuning, COL, LEVELS, ZOOM_STEP, fa } from "./game/config";
 import { Game } from "./game/engine";
 import { render } from "./game/render";
 import { loadSave, persist, persistChanges, Save } from "./game/save";
@@ -183,8 +183,8 @@ export default function App() {
     if (cur.baseCap !== s.maxTroops) cur.setMaxTroops(s.maxTroops);
     const minRoadLength = s.minCastleDistance * PX_PER_METER;
     // فقط اگر قوانینِ راه واقعاً عوض شده باشد، شبکهٔ راه بازسازی می‌شود
-    if (cur.openRoads !== s.openRoads || cur.minRoadLength !== minRoadLength || cur.randomRoads !== s.customMap.randomRoads) {
-      cur.setRoadRules({ openRoads: s.openRoads, minRoadLength, randomRoads: s.customMap.randomRoads });
+    if (cur.openRoads !== s.openRoads || cur.minRoadLength !== minRoadLength) {
+      cur.setRoadRules({ openRoads: s.openRoads, minRoadLength });
     }
     setHud(snapshot(cur));
   }, []);
@@ -235,7 +235,7 @@ export default function App() {
     // همهٔ تغییرها از مسیرِ امن اعمال می‌شوند تا وضعیتِ نبرد بازنشانی نشود.
     applyGlobalToGame(save);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [save.snd, save.volumes, save.speed, save.battleMode, save.maxTroops, save.ambientSound, save.marchSound, save.openRoads, save.minCastleDistance, save.customMap.randomRoads, save.attackDash]);
+  }, [save.snd, save.volumes, save.speed, save.battleMode, save.maxTroops, save.ambientSound, save.marchSound, save.openRoads, save.minCastleDistance, save.haloSpin, save.attackDash]);
 
   /**
    * تا وقتی یک پنل روی بازی باز است، نبرد حتماً متوقف می‌ماند؛
@@ -296,7 +296,6 @@ export default function App() {
       g.setRoadRules({
         openRoads: saveRef.current.openRoads,
         minRoadLength: saveRef.current.minCastleDistance * PX_PER_METER,
-        randomRoads: saveRef.current.customMap.randomRoads,
       });
       g.onToast = toastIt;
       g.onDemoReset = () => {
@@ -361,7 +360,7 @@ export default function App() {
       toastIt(error);
       return;
     }
-    const level = createRandomLevel(mapSettings);
+    const level = createRandomLevel({ ...mapSettings, minDistance: saveRef.current.minCastleDistance });
     // فقط و فقط تنظیماتِ نقشه عوض می‌شود؛ تنظیماتِ سراسری دست‌نخورده می‌ماند.
     updateSave((prev) => ({ ...prev, customMap: mapSettings }));
 
@@ -376,6 +375,24 @@ export default function App() {
     window.setTimeout(() => setBanner(null), 2400);
     sfx.start();
   }, [applyGlobalToGame, toastIt, updateSave, wire]);
+
+  const restartCurrentBattle = useCallback(() => {
+    const cur = gameRef.current;
+    if (!cur) return;
+    if (cur.i < LEVELS.length) {
+      startLevel(cur.i);
+      return;
+    }
+    const g = wire(new Game(LEVELS.length, false, cur.L));
+    gameRef.current = g;
+    applyGlobalToGame(saveRef.current);
+    setResult(null);
+    setHud(snapshot(g));
+    setScreen("game");
+    setBanner("شروع دوباره · " + cur.L.name);
+    window.setTimeout(() => setBanner(null), 2400);
+    sfx.start();
+  }, [applyGlobalToGame, startLevel, wire]);
 
   /* ---------- حلقهٔ رسم ---------- */
   useEffect(() => {
@@ -408,7 +425,7 @@ export default function App() {
       event.preventDefault();
       const stage = stageRef.current ?? cv;
       const p = toStagePoint(event.clientX, event.clientY, rotationRef.current, stage.getBoundingClientRect());
-      const step = event.deltaY > 0 ? -0.12 : 0.12;
+      const step = event.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
       game.zoomAt(step, p.x, p.y, cv.clientWidth, cv.clientHeight);
       setHud(snapshot(game));
     };
@@ -762,7 +779,8 @@ export default function App() {
             g.paused = false;
             setScreen("game");
           }}
-          onRestart={() => g.i >= LEVELS.length ? startCustomMap(saveRef.current.customMap) : startLevel(g.i)}
+          onRestart={restartCurrentBattle}
+          onNewRandomMap={() => startCustomMap(saveRef.current.customMap)}
           onLevels={() => openSub("levels", "game")}
           onSettings={() => openSub("settings", "game")}
           onMenu={toMenu}
@@ -781,7 +799,8 @@ export default function App() {
           eCount={result.e}
           pCastles={result.pc}
           onNext={() => startLevel(Math.min(LEVELS.length - 1, g.i + 1))}
-          onRestart={() => g.i >= LEVELS.length ? startCustomMap(saveRef.current.customMap) : startLevel(g.i)}
+          onRestart={restartCurrentBattle}
+          onNewRandomMap={() => startCustomMap(saveRef.current.customMap)}
           onLevels={() => openSub("levels", "game")}
         />
       )}

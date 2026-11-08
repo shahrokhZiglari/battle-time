@@ -102,7 +102,18 @@ public partial class CastleGamePage
 
     private Task Play() => StartLevel(GameService.Settings.UnlockedLevel - 1);
     private Task StartSavedRandomMap() => GenerateRandomMap(GameService.Settings.CustomMap);
-    private Task Restart() => State.IsCustom ? GenerateRandomMap(GameService.Settings.CustomMap) : StartLevel(State.LevelIndex);
+    private async Task Restart()
+    {
+        if (State.IsCustom)
+        {
+            HandledResult = false;
+            BattleInMenu = false;
+            await Command("restart");
+            Screen = GameScreen.Playing;
+            return;
+        }
+        await StartLevel(State.LevelIndex);
+    }
     private Task Next() => StartLevel(Math.Min(CastleLevelsData.All.Count - 1, State.LevelIndex + 1));
     private Task SetPercent(int percent) => Command("percent", percent);
     private Task Zoom(double delta) => Command("zoom", delta);

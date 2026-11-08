@@ -89,5 +89,20 @@ check("رسم نقشهٔ سه بازیکنه با ۴۰ قلعه و برج", () =
   if (!(g.view.s > fitScale && g.view.ox !== (1440 - g.worldWidth * g.view.s) / 2)) throw new Error("zoom and pan camera was not applied");
 });
 
+check("رسم افکت جدید فتح در مراحل مختلف پیشرفت (۰٪ تا ۱۰۰٪)", () => {
+  const g = new Game(0);
+  const src = g.bs.find((b) => b.o === 1)!;
+  const dst = g.bs.find((b) => b.o !== 1)!;
+  src.army.normal = 30;
+  dst.army = { normal: 2, fast: 0, heavy: 0 };
+  g.sendN(src, dst, 25, [src, dst]);
+  g.arrive(g.sq.shift()!);
+  if (!g.fx.some((f) => f.k === "capture")) throw new Error("capture effect was not emitted");
+  for (let step = 0; step <= 10; step++) {
+    render(ctx, g, 1 + step * 0.1, 1280, 800, 2);
+    g.step(0.1);
+  }
+});
+
 console.log(fails ? `\n${fails} خطا در رسم` : "\nمسیر رسم سالم ✔");
 process.exit(fails ? 1 : 0);
