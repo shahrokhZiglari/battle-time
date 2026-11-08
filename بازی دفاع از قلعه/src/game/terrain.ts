@@ -222,9 +222,10 @@ function buildVoyagers(g: Game, count: number, islands: Island[], shores: Point[
   if (count <= 0) return [];
   const W = g.worldWidth;
   const H = g.worldHeight;
-  const startX = -150;
-  const endX = W + 150;
-  const steps = 26;
+  const marginX = Math.max(380, Math.round(W * 0.48));
+  const startX = -marginX;
+  const endX = W + marginX;
+  const steps = 38;
   const sails = ["#f3ead6", "#e8b44c", "#dfe9ef", "#f7d99c"];
   const hulls = ["#6b4a2b", "#5c3f26", "#7a5533", "#654328"];
   const routes: Point[][] = [];

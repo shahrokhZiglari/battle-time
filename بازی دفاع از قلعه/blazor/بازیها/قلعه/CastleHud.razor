@@ -26,14 +26,11 @@
     </div>
     <div class="cg-controls">
         <span class="cg-muted">اعزام</span>
-        @if (State.LargeMap)
-        {
-            <div class="cg-zoom-controls" aria-label="بزرگ‌نمایی نقشه">
-                <button type="button" class="cg-btn cg-zoom-step" disabled="@(State.Zoom <= 1)" aria-label="کوچک‌نمایی" title="کوچک‌نمایی" @onclick="() => OnZoom.InvokeAsync(-0.15)">−</button>
-                <button type="button" class="cg-btn cg-zoom-value" title="بازنشانی زوم" @onclick="() => OnZoom.InvokeAsync(0)">@(Math.Round(State.Zoom * 100))٪</button>
-                <button type="button" class="cg-btn cg-zoom-step" disabled="@(State.Zoom >= 3)" aria-label="بزرگ‌نمایی" title="بزرگ‌نمایی" @onclick="() => OnZoom.InvokeAsync(0.15)">+</button>
-            </div>
-        }
+        <div class="cg-zoom-controls" aria-label="بزرگ‌نمایی نقشه">
+            <button type="button" class="cg-btn cg-zoom-step" disabled="@(State.Zoom <= 0.55 + 1e-6)" aria-label="کوچک‌نمایی" title="کوچک‌نمایی (عقب بردن دوربین)" @onclick="() => OnZoom.InvokeAsync(-0.15)">−</button>
+            <button type="button" class="cg-btn cg-zoom-value" title="بازنشانی زوم به ۱۰۰٪" @onclick="() => OnZoom.InvokeAsync(0)">@(Math.Round(State.Zoom * 100))٪</button>
+            <button type="button" class="cg-btn cg-zoom-step" disabled="@(State.Zoom >= 3 - 1e-6)" aria-label="بزرگ‌نمایی" title="بزرگ‌نمایی" @onclick="() => OnZoom.InvokeAsync(0.15)">+</button>
+        </div>
         @foreach (var pct in new[] { 20, 60, 80 })
         {
             <button type="button" class="cg-btn @(State.Percent == pct ? "cg-gold" : "")"

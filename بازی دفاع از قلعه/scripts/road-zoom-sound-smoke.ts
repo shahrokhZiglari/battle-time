@@ -1,7 +1,7 @@
 /* آزمون قوانین راه‌ها، زوم و صداها با مدل جدید: فاصلهٔ همسایگان به متر + راه‌های رندوم در مپ رندوم */
 import assert from "node:assert/strict";
 import { Game } from "../src/game/engine";
-import { LEVELS } from "../src/game/config";
+import { LEVELS, MAX_ZOOM, MIN_ZOOM, ZOOM_STEP } from "../src/game/config";
 import { createRandomLevel, DEFAULT_RANDOM_MAP, PX_PER_METER, type RandomMapSettings } from "../src/game/map";
 import { loadSave } from "../src/game/save";
 import { setSound } from "../src/game/sound";
@@ -52,13 +52,21 @@ setSound(false);
   assert.ok(Math.abs(after.x - before.x) < 2);
   assert.ok(Math.abs(after.y - before.y) < 2);
   for (let i = 0; i < 30; i++) g.zoomBy(0.2);
-  assert.ok(Math.abs(g.zoom - 3) < 1e-9);
-  for (let i = 0; i < 30; i++) g.zoomBy(-0.2);
-  assert.ok(Math.abs(g.zoom - 1) < 1e-9);
-  g.zoomBy(0.5);
+  assert.ok(Math.abs(g.zoom - MAX_ZOOM) < 1e-9);
+  g.zoomBy(0);
+  assert.equal(g.zoom, 1, "reset returns to 100%");
+  // ۳ مرحله زوم‌اوت عقب‌تر از ۱۰۰٪: ۸۵٪ -> ۷۰٪ -> ۵۵٪
+  g.zoomBy(-ZOOM_STEP);
+  assert.equal(g.zoom, 0.85);
+  g.zoomBy(-ZOOM_STEP);
+  assert.equal(g.zoom, 0.7);
+  g.zoomBy(-ZOOM_STEP);
+  assert.equal(g.zoom, MIN_ZOOM);
+  for (let i = 0; i < 10; i++) g.zoomBy(-ZOOM_STEP);
+  assert.ok(Math.abs(g.zoom - MIN_ZOOM) < 1e-9, "clamps at 3 zoom-out steps (55%)");
   g.zoomBy(0);
   assert.equal(g.zoom, 1, "reset returns to fit");
-  console.log("PASS: zoom keeps the cursor point anchored and resets to fit.");
+  console.log("PASS: zoom allows 3 steps of zoom-out (down to 55%), anchors cursor, and resets to 100%.");
 }
 
 // 5) تنظیمات ذخیره‌شده: فاصله پیش‌فرض ۱۰ متر و حذف گزینهٔ راه‌های رندوم.

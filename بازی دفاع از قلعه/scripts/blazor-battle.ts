@@ -1,4 +1,4 @@
-import { applyUnitTuning, COL, DEFAULT_ATTACK_DASH, DEFAULT_HALO_SPIN, LEVELS, normalizeAttackDash, normalizeHaloSpin, normalizeUnitTuning, type UnitTuningMap } from "../src/game/config";
+import { applyUnitTuning, COL, DEFAULT_ATTACK_DASH, DEFAULT_HALO_SPIN, LEVELS, normalizeAttackDash, normalizeHaloSpin, normalizeUnitTuning, ZOOM_STEP, type UnitTuningMap } from "../src/game/config";
 import { Game } from "../src/game/engine";
 import { render } from "../src/game/render";
 import { DEFAULT_SFX_VOLUMES, setNatureLayers, setSfxVolumes, setSound, sfx, SFX_KEYS, type SfxKey } from "../src/game/sound";
@@ -451,7 +451,7 @@ export function initialize(canvas: HTMLCanvasElement, callback: Callback, input:
     if (!canPlay()) return;
     event.preventDefault();
     const rect = canvas.getBoundingClientRect();
-    const step = event.deltaY > 0 ? -0.12 : 0.12;
+    const step = event.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
     s.game.zoomAt(step, event.clientX - rect.left, event.clientY - rect.top, canvas.clientWidth, canvas.clientHeight);
     notify(s, performance.now(), true);
   }, { signal, passive: false });

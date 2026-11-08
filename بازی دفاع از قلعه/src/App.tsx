@@ -3,7 +3,7 @@ import Hud, { HudData } from "./components/Hud";
 import { EndPanel, HelpPanel, LevelsPanel, MenuPanel, PausePanel, RandomMapPanel, SettingsPanel } from "./components/Panels";
 import { RotateFab } from "./components/RotateControl";
 import { PanelBoundary } from "./components/PanelBoundary";
-import { applyUnitTuning, COL, LEVELS, fa } from "./game/config";
+import { applyUnitTuning, COL, LEVELS, ZOOM_STEP, fa } from "./game/config";
 import { Game } from "./game/engine";
 import { render } from "./game/render";
 import { loadSave, persist, persistChanges, Save } from "./game/save";
@@ -425,7 +425,7 @@ export default function App() {
       event.preventDefault();
       const stage = stageRef.current ?? cv;
       const p = toStagePoint(event.clientX, event.clientY, rotationRef.current, stage.getBoundingClientRect());
-      const step = event.deltaY > 0 ? -0.12 : 0.12;
+      const step = event.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
       game.zoomAt(step, p.x, p.y, cv.clientWidth, cv.clientHeight);
       setHud(snapshot(game));
     };

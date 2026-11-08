@@ -79,6 +79,11 @@ export interface Level {
 /** هماهنگ با آرایهٔ THEMES در terrain.ts — تعداد پالت‌های رنگی نقشه */
 export const THEME_COUNT = 5;
 
+/** گام بزرگ‌نمایی/کوچک‌نمایی و بازهٔ مجاز زوم (۳ مرحله عقب‌تر از ۱۰۰٪ تا ۵۵٪) */
+export const ZOOM_STEP = 0.15;
+export const MIN_ZOOM = 0.55;
+export const MAX_ZOOM = 3;
+
 export const CFG = {
   W: 1000,
   H: 600,

@@ -23,7 +23,7 @@
     "بازیها/قلعه/CastleSettingsModal.razor",
     "بازیها/قلعه/_Imports.razor"
   ],
-  "bytes": 88034,
+  "bytes": 88163,
   "entryPage": "بازیها/قلعه/CastleGamePage.razor",
   "staticScript": "wwwroot/قلعه/castle.js",
   "route": "/games/castle"

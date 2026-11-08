@@ -7,6 +7,9 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
 
 // src/game/config.ts
 var THEME_COUNT = 5;
+var ZOOM_STEP = 0.15;
+var MIN_ZOOM = 0.55;
+var MAX_ZOOM = 3;
 var CFG = {
   W: 1e3,
   H: 600,
@@ -1386,9 +1389,10 @@ function buildVoyagers(g, count, islands, shores) {
   if (count <= 0) return [];
   const W = g.worldWidth;
   const H = g.worldHeight;
-  const startX = -150;
-  const endX = W + 150;
-  const steps = 26;
+  const marginX = Math.max(380, Math.round(W * 0.48));
+  const startX = -marginX;
+  const endX = W + marginX;
+  const steps = 38;
   const sails = ["#f3ead6", "#e8b44c", "#dfe9ef", "#f7d99c"];
   const hulls = ["#6b4a2b", "#5c3f26", "#7a5533", "#654328"];
   const routes = [];
@@ -2621,7 +2625,8 @@ var Game = class {
       this.panX = 0;
       this.panY = 0;
     } else {
-      this.zoom = Math.max(1, Math.min(3, this.zoom + delta));
+      const next = Math.round((this.zoom + delta) * 100) / 100;
+      this.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, next));
     }
     this.preview = this.computePreview();
   }
@@ -4780,7 +4785,7 @@ function initialize(canvas, callback, input) {
     if (!canPlay()) return;
     event.preventDefault();
     const rect = canvas.getBoundingClientRect();
-    const step = event.deltaY > 0 ? -0.12 : 0.12;
+    const step = event.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
     s.game.zoomAt(step, event.clientX - rect.left, event.clientY - rect.top, canvas.clientWidth, canvas.clientHeight);
     notify(s, performance.now(), true);
   }, { signal, passive: false });

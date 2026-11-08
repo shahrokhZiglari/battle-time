@@ -1,4 +1,4 @@
-import { Building, CFG, COL, DEFAULT_ATTACK_DASH, DEFAULT_HALO_SPIN, defOf, Effect, fa, Level, LEVELS, Owner, Squad, TROOP_TYPES, UNITS } from "./config";
+import { Building, CFG, COL, DEFAULT_ATTACK_DASH, DEFAULT_HALO_SPIN, defOf, Effect, fa, Level, LEVELS, MAX_ZOOM, MIN_ZOOM, Owner, Squad, TROOP_TYPES, UNITS } from "./config";
 import { sfx } from "./sound";
 import { setNatureSound } from "./nature-audio";
 import { addUnit, armyCount, armyPower, createArmy, damageArmy, emptyArmy, producedUnit, selectArmy, takeArmy, unitCount } from "./troops";
@@ -294,7 +294,8 @@ export class Game {
       this.panX = 0;
       this.panY = 0;
     } else {
-      this.zoom = Math.max(1, Math.min(3, this.zoom + delta));
+      const next = Math.round((this.zoom + delta) * 100) / 100;
+      this.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, next));
     }
     this.preview = this.computePreview();
   }
